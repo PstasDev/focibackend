@@ -34,7 +34,7 @@ class Team(models.Model):
     tagozat = models.CharField(max_length=100)
 
     def __str__(self):
-        return f"{self.tournament.name} - {self.start_year[:-2]}{self.tagozat}"
+        return f"{self.start_year}{self.tagozat} - {self.tournament.name}"
 
 class Tournament(models.Model):
     name = models.CharField(max_length=200)
