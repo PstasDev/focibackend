@@ -175,3 +175,5 @@ def csapat_pontkiosztas(csapatok, csapat, lott, kapott):
         team['ties'] += 1
     else:
         team['losses'] += 1
+
+

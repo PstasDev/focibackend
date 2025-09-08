@@ -1,8 +1,8 @@
 from ninja import NinjaAPI, Router
 from .models import Team, Tournament, Match, Event, Player, Profile 
-from .schemas import TeamSchema, TopScorerSchema, TournamentSchema, PlayerSchema, MatchSchema, EventSchema, StandingSchema
+from .schemas import TeamSchema, TopScorerSchema, TournamentSchema, PlayerSchema, MatchSchema, EventSchema, StandingSchema, AllEventsSchema, PlayerStatSchema
 from django.shortcuts import get_object_or_404
-from .utils import process_matches, get_goal_scorers
+from .utils import process_matches, get_goal_scorers, calculate_player_stats
 
 app = NinjaAPI()
 router = Router()
@@ -37,6 +37,30 @@ def get_tournament_teams(request, tournament_id: int):
     tournament = get_object_or_404(Tournament, id=tournament_id)
     return Team.objects.filter(tournament=tournament)
 
+# Adott csapat a bajnokságban
+@router.get("/tournaments/{tournament_id}/teams/{team_id}", response=TeamSchema)
+def get_tournament_team(request, tournament_id: int, team_id: int):
+    tournament = get_object_or_404(Tournament, id=tournament_id)
+    team = get_object_or_404(Team, id=team_id, tournament=tournament)
+    return team
+
+# Adott csapat játékosai a bajnokságban
+@router.get("/tournaments/{tournament_id}/teams/{team_id}/players", response=list[PlayerSchema])
+def get_tournament_team_players(request, tournament_id: int, team_id: int):
+    tournament = get_object_or_404(Tournament, id=tournament_id)
+    team = get_object_or_404(Team, id=team_id, tournament=tournament)
+    return Player.objects.filter(team=team)
+
+
+# Adott csapat meccsei a bajnokságban
+@router.get("/tournaments/{tournament_id}/teams/{team_id}/matches", response=list[MatchSchema])
+def get_tournament_team_matches(request, tournament_id: int, team_id: int): 
+    tournament = get_object_or_404(Tournament, id=tournament_id)
+    team = get_object_or_404(Team, id=team_id, tournament=tournament)
+    return Match.objects.filter(tournament=tournament, team1=team) | Match.objects.filter(tournament=tournament, team2=team)
+
+
+
 # Bajnokság góllövői
 @router.get("/tournaments/{tournament_id}/topscorers", response=list[TopScorerSchema])
 def get_tournament_top_scorers(request, tournament_id: int):
@@ -44,7 +68,62 @@ def get_tournament_top_scorers(request, tournament_id: int):
     matches = Match.objects.filter(tournament=tournament)
     goals = Event.objects.filter(event_type='goal').filter(match__in=matches)
     return get_goal_scorers(goals)
+
+# Bajnokság játékos statisztikák
+@router.get("/tournaments/{tournament_id}/playerstats", response=list[PlayerStatSchema])
+def get_tournament_player_stats(request, tournament_id: int):
+    tournament = get_object_or_404(Tournament, id=tournament_id)
+    return calculate_player_stats(tournament)
+
     
+# Összes gól a bajnokságban
+@router.get("/tournaments/{tournament_id}/goals", response=list[EventSchema])
+def get_all_goals(request, tournament_id: int):
+    tournament = get_object_or_404(Tournament, id=tournament_id)
+    goals = Event.objects.filter(event_type='goal', match__tournament=tournament)
+    return goals
+
+# Összes sárga lap a bajnokságban
+@router.get("/tournaments/{tournament_id}/yellow_cards", response=list[EventSchema])
+def get_all_yellow_cards(request, tournament_id: int):
+    tournament = get_object_or_404(Tournament, id=tournament_id)
+    yellow_cards = Event.objects.filter(event_type='yellow_card', match__tournament=tournament)
+    return yellow_cards
+
+# Összes piros lap a bajnokságban
+@router.get("/tournaments/{tournament_id}/red_cards", response=list[EventSchema])
+def get_all_red_cards(request, tournament_id: int):
+    tournament = get_object_or_404(Tournament, id=tournament_id)
+    red_cards = Event.objects.filter(event_type='red_card', match__tournament=tournament)
+    return red_cards
+
+# Összes játékos a bajnokságban
+@router.get("/tournaments/{tournament_id}/players", response=list[PlayerSchema])
+def get_tournament_players(request, tournament_id: int):
+    tournament = get_object_or_404(Tournament, id=tournament_id)
+    players = Player.objects.filter(team__tournament=tournament)
+    return players
+
+# Adott játékos a bajnokságban
+@router.get("/tournaments/{tournament_id}/players/{player_id}", response=PlayerSchema)
+def get_tournament_player(request, tournament_id: int, player_id: int):
+    tournament = get_object_or_404(Tournament, id=tournament_id)
+    player = get_object_or_404(Player, id=player_id, team__tournament=tournament)
+    return player
+
+# Adott játékos eventjei a bajnokságban
+@router.get("/tournaments/{tournament_id}/players/{player_id}/events", response=AllEventsSchema)
+def get_tournament_player_events(request, tournament_id: int, player_id: int):
+    tournament = get_object_or_404(Tournament, id=tournament_id)
+    player = get_object_or_404(Player, id=player_id, team__tournament=tournament)
+    events = Event.objects.filter(player=player, match__tournament=tournament)
+
+    return AllEventsSchema(
+        goals=events.filter(event_type="goal"),
+        yellow_cards=events.filter(event_type="yellow_card"),
+        red_cards=events.filter(event_type="red_card"),
+    )
+ 
 
 # Minden csapat lekérdezése
 @router.get("/teams", response=list[TeamSchema])
@@ -57,17 +136,55 @@ def get_team(request, team_id: int):
     team = get_object_or_404(Team, id=team_id)
     return team
 
+
+# Adott csapat eventjei a bajnokságban
+@router.get("/tournaments/{tournament_id}/teams/{team_id}/events", response=AllEventsSchema)
+def get_tournament_team_events(request, tournament_id: int, team_id: int):
+    tournament = get_object_or_404(Tournament, id=tournament_id)
+    team = get_object_or_404(Team, id=team_id, tournament=tournament)
+    events = Event.objects.filter(match__tournament=tournament).filter(
+    match__team1=team
+    ) | Event.objects.filter(match__tournament=tournament).filter(
+        match__team2=team
+    )
+
+    return AllEventsSchema(
+        goals=events.filter(event_type="goal"),
+        yellow_cards=events.filter(event_type="yellow_card"),
+        red_cards=events.filter(event_type="red_card"),
+    )  
+
+# Csapat játékosai
+@router.get("/teams/{team_id}/players", response=list[PlayerSchema])
+def get_team_players(request, team_id: int):
+    team = get_object_or_404(Team, id=team_id)
+    return Player.objects.filter(team=team), Team.objects.filter(id=team_id)
+
+
 # Minden player lekérdezése
 @router.get("/players", response=list[PlayerSchema])
 def get_players(request):
     players = Player.objects.all()
     return players
 
-# Minden player lekérdezése
+# Player lekérdezése
 @router.get("/players/{player_id}", response=PlayerSchema)
 def get_player(request, player_id: int):
     player = get_object_or_404(Player, id=player_id)
     return player
+
+#Player összes eventje
+@router.get("/players/{player_id}/events", response=AllEventsSchema)
+def get_player_events(request, player_id: int):
+    player = get_object_or_404(Player, id=player_id)
+    events = Event.objects.filter(player=player)
+
+    return AllEventsSchema(
+        goals=events.filter(event_type="goal"),
+        yellow_cards=events.filter(event_type="yellow_card"),
+        red_cards=events.filter(event_type="red_card"),
+    )
+
 
 # Minden meccs lekérdezése
 @router.get("/matches", response=list[MatchSchema])

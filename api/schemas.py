@@ -64,3 +64,9 @@ class TopScorerSchema(Schema):
     id: int
     name: str
     goals: int
+
+class AllEventsSchema(Schema):
+    goals: list[EventSchema] = []
+    yellow_cards: list[EventSchema] = []
+    red_cards: list[EventSchema] = []
+
