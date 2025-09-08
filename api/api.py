@@ -59,8 +59,6 @@ def get_tournament_team_matches(request, tournament_id: int, team_id: int):
     team = get_object_or_404(Team, id=team_id, tournament=tournament)
     return Match.objects.filter(tournament=tournament, team1=team) | Match.objects.filter(tournament=tournament, team2=team)
 
-
-
 # Bajnokság góllövői
 @router.get("/tournaments/{tournament_id}/topscorers", response=list[TopScorerSchema])
 def get_tournament_top_scorers(request, tournament_id: int):
@@ -68,13 +66,6 @@ def get_tournament_top_scorers(request, tournament_id: int):
     matches = Match.objects.filter(tournament=tournament)
     goals = Event.objects.filter(event_type='goal').filter(match__in=matches)
     return get_goal_scorers(goals)
-
-# Bajnokság játékos statisztikák
-@router.get("/tournaments/{tournament_id}/playerstats", response=list[PlayerStatSchema])
-def get_tournament_player_stats(request, tournament_id: int):
-    tournament = get_object_or_404(Tournament, id=tournament_id)
-    return calculate_player_stats(tournament)
-
     
 # Összes gól a bajnokságban
 @router.get("/tournaments/{tournament_id}/goals", response=list[EventSchema])
