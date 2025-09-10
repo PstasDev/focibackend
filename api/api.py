@@ -2,7 +2,7 @@ from ninja import NinjaAPI, Router
 from .models import Team, Tournament, Match, Event, Player, Profile 
 from .schemas import TeamSchema, TopScorerSchema, TournamentSchema, PlayerSchema, MatchSchema, EventSchema, StandingSchema, AllEventsSchema
 from django.shortcuts import get_object_or_404
-from .utils import process_matches, get_goal_scorers, calculate_player_stats
+from .utils import process_matches, get_goal_scorers
 
 app = NinjaAPI()
 router = Router()
