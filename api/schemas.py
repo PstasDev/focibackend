@@ -1,5 +1,5 @@
 from ninja import ModelSchema, Schema
-from .models import Team, Tournament, Match, Event, Player, Profile
+from .models import Team, Tournament, Match, Event, Player, Profile, Round
 from django.contrib.auth.models import User
 
 class UserSchema(ModelSchema):
@@ -8,6 +8,7 @@ class UserSchema(ModelSchema):
         fields = '__all__'
 
 class ProfileSchema(ModelSchema):
+    player: 'PlayerSchema | None' = None
     class Meta:
         model = Profile
         fields = '__all__'
@@ -20,6 +21,12 @@ class PlayerSchema(ModelSchema):
 class TournamentSchema(ModelSchema):
     class Meta:
         model = Tournament
+        fields = '__all__'
+
+class RoundSchema(ModelSchema):
+    tournament: TournamentSchema | None = None
+    class Meta:
+        model = Round
         fields = '__all__'
         
 
@@ -41,6 +48,8 @@ class MatchSchema(ModelSchema):
     team1: TeamSchema | None = None
     team2: TeamSchema | None = None
     tournament: TournamentSchema | None = None
+    round_obj: RoundSchema | None = None
+    referee: ProfileSchema | None = None
     events: list[EventSchema] = []
 
     class Meta:

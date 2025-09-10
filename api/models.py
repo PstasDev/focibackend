@@ -6,6 +6,8 @@ class Profile(models.Model):
     user = models.OneToOneField('auth.User', on_delete=models.CASCADE)
     biro = models.BooleanField(default=False)
 
+    player = models.ForeignKey('Player', null=True, blank=True, on_delete=models.SET_NULL)
+
     def __str__(self):
         return self.user.username
 
@@ -13,6 +15,7 @@ class Profile(models.Model):
 
 class Player(models.Model):
     name = models.CharField(max_length=100)
+    csk = models.BooleanField(default=False) # Csapatkapitány
 
     def get_stats(self):
         matches = Match.objects.filter(models.Q(team1__players=self) | models.Q(team2__players=self))
@@ -33,11 +36,18 @@ class Team(models.Model):
     start_year = models.IntegerField()
     tagozat = models.CharField(max_length=100)
 
+    registration_time = models.DateTimeField(auto_now_add=True, null=True, blank=True)
+    active = models.BooleanField(default=True)
+
     def __str__(self):
         return f"{self.start_year}{self.tagozat} - {self.tournament.name}"
 
 class Tournament(models.Model):
     name = models.CharField(max_length=200)
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
+    registration_open = models.BooleanField(default=False)
+    registration_deadline = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return self.name
@@ -59,19 +69,44 @@ class Match(models.Model):
 
     events = models.ManyToManyField('Event', blank=True)
 
+    referee = models.ForeignKey('Profile', null=True, blank=True, on_delete=models.SET_NULL)
+
+
+    def result(self):
+        goals_team1 = self.events.filter(event_type='goal', player__in=self.team1.players.all()).count()
+        goals_team2 = self.events.filter(event_type='goal', player__in=self.team2.players.all()).count()
+        return (goals_team1, goals_team2)
+
+    def team_goals(self, team):
+        if team == self.team1:
+            return self.events.filter(event_type='goal', player__in=self.team1.players.all()).count()
+        elif team == self.team2:
+            return self.events.filter(event_type='goal', player__in=self.team2.players.all()).count()
+        else:
+            return 0
+
     def __str__(self):
         return f"{self.team1} vs {self.team2} on {self.datetime}"
 
 class Event(models.Model):
     EVENT_TYPES = [
+        ('match_start', 'Match Start'),
         ('goal', 'Goal'),
         ('yellow_card', 'Yellow Card'),
         ('red_card', 'Red Card'),
+        ('half_time', 'Half Time'),
+        ('full_time', 'Full Time'),
+        ('extra_time', 'Extra Time'),
+        ('match_end', 'Match End'),
     ]
 
     event_type = models.CharField(max_length=20, choices=EVENT_TYPES)
-    player = models.ForeignKey('Player', on_delete=models.CASCADE)
     minute = models.IntegerField()
+    exact_time = models.DateTimeField(null=True, blank=True)
+
+    # Depending on event_type, player may be null (e.g., match_start)
+    player = models.ForeignKey('Player', on_delete=models.CASCADE, null=True, blank=True)
+    extra_time = models.IntegerField(null=True, blank=True)
 
     def __str__(self):
         return f"{self.get_event_type_display()} by {self.player} at {self.minute}'"
