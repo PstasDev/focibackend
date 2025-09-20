@@ -23,6 +23,22 @@ class TournamentSchema(ModelSchema):
         model = Tournament
         fields = '__all__'
 
+class TournamentCreateSchema(Schema):
+    name: str
+    start_date: str | None = None
+    end_date: str | None = None
+    registration_open: bool = False
+    registration_deadline: str | None = None
+    registration_by_link: str | None = None
+
+class TournamentUpdateSchema(Schema):
+    name: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    registration_open: bool | None = None
+    registration_deadline: str | None = None
+    registration_by_link: str | None = None
+
 class RoundSchema(ModelSchema):
     tournament: TournamentSchema | None = None
     class Meta:
@@ -36,6 +52,19 @@ class TeamSchema(ModelSchema):
     class Meta:
         model = Team
         fields = '__all__'
+
+class TeamCreateSchema(Schema):
+    tournament_id: int
+    name: str | None = None
+    start_year: int
+    tagozat: str
+    active: bool = True
+
+class TeamUpdateSchema(Schema):
+    name: str | None = None
+    start_year: int | None = None
+    tagozat: str | None = None
+    active: bool | None = None
 
 class EventSchema(ModelSchema):
     player: PlayerSchema | None = None
