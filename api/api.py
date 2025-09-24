@@ -1,13 +1,15 @@
 from ninja import NinjaAPI, Router
 from .models import Team, Tournament, Match, Event, Player, Profile, Round
-from .schemas import TeamSchema, TopScorerSchema, TournamentSchema, PlayerSchema, MatchSchema, EventSchema, StandingSchema, AllEventsSchema, RoundSchema, ProfileSchema
+from .schemas import TeamSchema, TeamCreateSchema, TeamUpdateSchema, TopScorerSchema, TournamentSchema, TournamentCreateSchema, TournamentUpdateSchema, PlayerSchema, MatchSchema, EventSchema, StandingSchema, AllEventsSchema, RoundSchema, ProfileSchema
 from django.shortcuts import get_object_or_404
 from django.db import models
 from .utils import match_to_schema, matches_to_schema, process_matches, get_goal_scorers
+from .utils import process_matches, get_goal_scorers
+from datetime import datetime
 
 app = NinjaAPI()
 router = Router()
-app.add_router("/", router)
+app.add_router("/", router) 
 
 # Minden bajnokság lekérdezése
 @router.get("/tournaments", response=list[TournamentSchema])
@@ -24,6 +26,64 @@ def get_tournament(request, tournament_id: int):
 @router.get("/tournaments/open-for-registration", response=list[TournamentSchema])
 def get_open_tournaments(request):
     return Tournament.objects.filter(registration_open=True)
+
+# Új bajnokság létrehozása
+@router.post("/tournaments", response=TournamentSchema)
+def create_tournament(request, payload: TournamentCreateSchema):
+    tournament_data = payload.dict(exclude_unset=True)
+    
+    # Convert date strings to date objects if provided
+    if 'start_date' in tournament_data and tournament_data['start_date']:
+        tournament_data['start_date'] = datetime.strptime(tournament_data['start_date'], '%Y-%m-%d').date()
+    if 'end_date' in tournament_data and tournament_data['end_date']:
+        tournament_data['end_date'] = datetime.strptime(tournament_data['end_date'], '%Y-%m-%d').date()
+    if 'registration_deadline' in tournament_data and tournament_data['registration_deadline']:
+        tournament_data['registration_deadline'] = datetime.strptime(tournament_data['registration_deadline'], '%Y-%m-%d %H:%M:%S')
+    
+    tournament = Tournament.objects.create(**tournament_data)
+    return tournament
+
+# Bajnokság frissítése
+@router.put("/tournaments/{tournament_id}", response=TournamentSchema)
+def update_tournament(request, tournament_id: int, payload: TournamentUpdateSchema):
+    tournament = get_object_or_404(Tournament, id=tournament_id)
+    
+    update_data = payload.dict(exclude_unset=True)
+    
+    # Convert date strings to date objects if provided
+    if 'start_date' in update_data and update_data['start_date']:
+        update_data['start_date'] = datetime.strptime(update_data['start_date'], '%Y-%m-%d').date()
+    if 'end_date' in update_data and update_data['end_date']:
+        update_data['end_date'] = datetime.strptime(update_data['end_date'], '%Y-%m-%d').date()
+    if 'registration_deadline' in update_data and update_data['registration_deadline']:
+        update_data['registration_deadline'] = datetime.strptime(update_data['registration_deadline'], '%Y-%m-%d %H:%M:%S')
+    
+    for field, value in update_data.items():
+        setattr(tournament, field, value)
+    
+    tournament.save()
+    return tournament
+
+# Bajnokság részleges frissítése
+@router.patch("/tournaments/{tournament_id}", response=TournamentSchema)
+def patch_tournament(request, tournament_id: int, payload: TournamentUpdateSchema):
+    tournament = get_object_or_404(Tournament, id=tournament_id)
+    
+    update_data = payload.dict(exclude_unset=True)
+    
+    # Convert date strings to date objects if provided
+    if 'start_date' in update_data and update_data['start_date']:
+        update_data['start_date'] = datetime.strptime(update_data['start_date'], '%Y-%m-%d').date()
+    if 'end_date' in update_data and update_data['end_date']:
+        update_data['end_date'] = datetime.strptime(update_data['end_date'], '%Y-%m-%d').date()
+    if 'registration_deadline' in update_data and update_data['registration_deadline']:
+        update_data['registration_deadline'] = datetime.strptime(update_data['registration_deadline'], '%Y-%m-%d %H:%M:%S')
+    
+    for field, value in update_data.items():
+        setattr(tournament, field, value)
+    
+    tournament.save()
+    return tournament
 
 # Bajnokság állása
 @router.get("/tournaments/{tournament_id}/standings", response=list[StandingSchema])
@@ -169,6 +229,42 @@ def get_active_teams(request):
 @router.get("/teams/inactive", response=list[TeamSchema])
 def get_inactive_teams(request):
     return Team.objects.filter(active=False)
+
+# Új csapat létrehozása
+@router.post("/teams", response=TeamSchema)
+def create_team(request, payload: TeamCreateSchema):
+    team_data = payload.dict()
+    tournament_id = team_data.pop('tournament_id')
+    tournament = get_object_or_404(Tournament, id=tournament_id)
+    
+    team = Team.objects.create(tournament=tournament, **team_data)
+    return team
+
+# Csapat frissítése
+@router.put("/teams/{team_id}", response=TeamSchema)
+def update_team(request, team_id: int, payload: TeamUpdateSchema):
+    team = get_object_or_404(Team, id=team_id)
+    
+    update_data = payload.dict(exclude_unset=True)
+    
+    for field, value in update_data.items():
+        setattr(team, field, value)
+    
+    team.save()
+    return team
+
+# Csapat részleges frissítése
+@router.patch("/teams/{team_id}", response=TeamSchema)
+def patch_team(request, team_id: int, payload: TeamUpdateSchema):
+    team = get_object_or_404(Team, id=team_id)
+    
+    update_data = payload.dict(exclude_unset=True)
+    
+    for field, value in update_data.items():
+        setattr(team, field, value)
+    
+    team.save()
+    return team
 
 
 # Adott csapat eventjei a bajnokságban

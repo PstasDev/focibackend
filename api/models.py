@@ -33,6 +33,7 @@ class Team(models.Model):
     tournament = models.ForeignKey('Tournament', on_delete=models.CASCADE)
     players = models.ManyToManyField('Player')
 
+    name = models.CharField(max_length=200, blank=True, null=True)
     start_year = models.IntegerField()
     tagozat = models.CharField(max_length=100)
 
@@ -40,7 +41,9 @@ class Team(models.Model):
     active = models.BooleanField(default=True)
 
     def __str__(self):
-        return f"{self.start_year}{self.tagozat} - {self.tournament.name}"
+        if self.name:
+            return self.name
+        return f"{self.start_year}{self.tagozat}"
 
 class Tournament(models.Model):
     name = models.CharField(max_length=200)
@@ -48,6 +51,8 @@ class Tournament(models.Model):
     end_date = models.DateField(null=True, blank=True)
     registration_open = models.BooleanField(default=False)
     registration_deadline = models.DateTimeField(null=True, blank=True)
+
+    registration_by_link = models.URLField(null=True, blank=True)
 
     def __str__(self):
         return self.name
