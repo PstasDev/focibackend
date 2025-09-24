@@ -1,4 +1,8 @@
 from .models import Match
+from .schemas import Event, EventSchema, MatchSchema, TeamSchema, TournamentSchema, RoundSchema, ProfileSchema
+from functools import cmp_to_key
+from collections import defaultdict
+from typing import Iterable
 
 
 def get_team_rank(bajnoksag, keresett_csapat_nev):
@@ -121,35 +125,13 @@ def get_player_rank(goals, student):
     return None
 
 
-def process_matches(tournament):
-    csapatok = {}
-
-    # Csak az adott bajnokság meccsei
-    meccsek = Match.objects.filter(tournament=tournament)
-
-    for meccs in meccsek:
-        # Meccsen belül gólok számolása Event alapján
-        team1_goals = meccs.events.filter(event_type='goal', player__in=meccs.team1.players.all()).count()
-        team2_goals = meccs.events.filter(event_type='goal', player__in=meccs.team2.players.all()).count()
-
-        # Pontkiosztás
-        csapat_pontkiosztas(csapatok, meccs.team1, team1_goals, team2_goals)
-        csapat_pontkiosztas(csapatok, meccs.team2, team2_goals, team1_goals)
-
-    # Rendezés: pont, gólkülönbség, lőtt gól
-    csapatok = sorted(
-        csapatok.values(),
-        key=lambda x: (x['points'], x['golarany'], x['lott']),
-        reverse=True
-    )
-    return csapatok
 
 
 def csapat_pontkiosztas(csapatok, csapat, lott, kapott):
     if csapat.id not in csapatok:
         csapatok[csapat.id] = {
             'id': csapat.id,
-            'nev': str(csapat),   # __str__ -> "9A - Tournament neve"
+            'nev': str(csapat),
             'meccsek': 0,
             'wins': 0,
             'ties': 0,
@@ -177,3 +159,146 @@ def csapat_pontkiosztas(csapatok, csapat, lott, kapott):
         team['losses'] += 1
 
 
+def process_matches(bajnoksag):
+    csapatok = {}
+    head_to_head = defaultdict(lambda: defaultdict(lambda: {"points": 0, "golarany": 0, "lott": 0}))
+
+    for match in bajnoksag.match_set.all():
+        goals_team1, goals_team2 = match.result()
+        t1, t2 = match.team1, match.team2
+
+        # összesített statok
+        csapat_pontkiosztas(csapatok, t1, goals_team1, goals_team2)
+        csapat_pontkiosztas(csapatok, t2, goals_team2, goals_team1)
+
+        # egymás elleni pontok
+        if goals_team1 > goals_team2:
+            head_to_head[t1.id][t2.id]["points"] += 3
+        elif goals_team1 == goals_team2:
+            head_to_head[t1.id][t2.id]["points"] += 1
+            head_to_head[t2.id][t1.id]["points"] += 1
+        else:
+            head_to_head[t2.id][t1.id]["points"] += 3
+
+        # egymás elleni gólkülönbség és gólok
+        head_to_head[t1.id][t2.id]["golarany"] += goals_team1 - goals_team2
+        head_to_head[t2.id][t1.id]["golarany"] += goals_team2 - goals_team1
+
+        head_to_head[t1.id][t2.id]["lott"] += goals_team1
+        head_to_head[t2.id][t1.id]["lott"] += goals_team2
+
+    return rangsorolas(csapatok, head_to_head)
+
+
+def rangsorolas(csapatok, head_to_head):
+    teams = list(csapatok.values())
+
+    def compare(a, b):
+        # 1. pontok
+        if a["points"] != b["points"]:
+            return b["points"] - a["points"]
+
+        # 2. egymás elleni pontok
+        h2h_a = head_to_head[a["id"]][b["id"]]
+        h2h_b = head_to_head[b["id"]][a["id"]]
+        if h2h_a["points"] != h2h_b["points"]:
+            return h2h_b["points"] - h2h_a["points"]
+
+        # 3. egymás elleni gólkülönbség
+        if h2h_a["golarany"] != h2h_b["golarany"]:
+            return h2h_b["golarany"] - h2h_a["golarany"]
+
+        # 4. egymás elleni lőtt gólok
+        if h2h_a["lott"] != h2h_b["lott"]:
+            return h2h_b["lott"] - h2h_a["lott"]
+
+        # 5. összesített gólkülönbség
+        if a["golarany"] != b["golarany"]:
+            return b["golarany"] - a["golarany"]
+
+        # 6. összesített lőtt gól
+        return b["lott"] - a["lott"]
+
+    rendezett = sorted(teams, key=cmp_to_key(compare))
+
+    for i, team in enumerate(rendezett, start=1):
+        team["position"] = i
+
+    return rendezett
+
+def event_to_schema(event: Event):
+    return {
+        "id": event.id,
+        "event_type": event.event_type,
+        "minute": event.minute,
+        "player_id": event.player.id if event.player else None,
+        "extra_time": event.extra_time,
+    }
+
+def match_to_schema(match: Match) -> MatchSchema:
+    team1 = match.team1
+    team2 = match.team2
+
+    team1_schema = TeamSchema(
+        id=team1.id,
+        tournament_id=team1.tournament.id,
+        start_year=team1.start_year,
+        tagozat=team1.tagozat,
+        active=team1.active,
+        registration_time=team1.registration_time.isoformat() if team1.registration_time else None,
+        name=str(team1),
+    )
+
+    team2_schema = TeamSchema(
+        id=team2.id,
+        tournament_id=team2.tournament.id,
+        start_year=team2.start_year,
+        tagozat=team2.tagozat,
+        active=team2.active,
+        registration_time=team2.registration_time.isoformat() if team2.registration_time else None,
+        name=str(team2),
+    )
+
+    tournament_schema = TournamentSchema(id=match.tournament.id, name=str(match.tournament))
+    round_schema = RoundSchema(id=match.round_obj.id, number=match.round_obj.number)
+    referee_schema = ProfileSchema(id=match.referee.id, name=str(match.referee)) if match.referee else None
+
+    # --- Gólok és lapok száma ---
+    team1_score = match.events.filter(event_type="goal", player__in=team1.players.all()).count()
+    team2_score = match.events.filter(event_type="goal", player__in=team2.players.all()).count()
+    team1_yellow = match.events.filter(event_type="yellow_card", player__in=team1.players.all()).count()
+    team2_yellow = match.events.filter(event_type="yellow_card", player__in=team2.players.all()).count()
+    team1_red = match.events.filter(event_type="red_card", player__in=team1.players.all()).count()
+    team2_red = match.events.filter(event_type="red_card", player__in=team2.players.all()).count()
+
+    return MatchSchema(
+        team1=team1_schema,
+        team2=team2_schema,
+        tournament=tournament_schema,
+        round_obj=round_schema,
+        referee=referee_schema,
+        team1_score=team1_score,
+        team2_score=team2_score,
+        team1_yellow_cards=team1_yellow,
+        team2_yellow_cards=team2_yellow,
+        team1_red_cards=team1_red,
+        team2_red_cards=team2_red,
+    )
+
+# --- Több Match -> list[MatchSchema] ---
+def matches_to_schema(matches: Iterable[Match]) -> list[MatchSchema]:
+    result = []
+    for match in matches:
+        team1 = match.team1
+        team2 = match.team2
+
+        # Számolás minden meccshez külön
+        team1_score = match.events.filter(event_type="goal", player__in=team1.players.all()).count()
+        team2_score = match.events.filter(event_type="goal", player__in=team2.players.all()).count()
+        team1_yellow = match.events.filter(event_type="yellow_card", player__in=team1.players.all()).count()
+        team2_yellow = match.events.filter(event_type="yellow_card", player__in=team2.players.all()).count()
+        team1_red = match.events.filter(event_type="red_card", player__in=team1.players.all()).count()
+        team2_red = match.events.filter(event_type="red_card", player__in=team2.players.all()).count()
+
+        result.append(match_to_schema(match))  # passzolhatod a számokat is, ha módosítod a match_to_schema-t
+    return result

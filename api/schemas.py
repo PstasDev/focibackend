@@ -25,6 +25,8 @@ class TournamentSchema(ModelSchema):
 
 class RoundSchema(ModelSchema):
     tournament: TournamentSchema | None = None
+    number: int | None = None
+
     class Meta:
         model = Round
         fields = '__all__'
@@ -44,17 +46,18 @@ class EventSchema(ModelSchema):
         model = Event
         fields = '__all__'
 
-class MatchSchema(ModelSchema):
+class MatchSchema(Schema):
     team1: TeamSchema | None = None
     team2: TeamSchema | None = None
     tournament: TournamentSchema | None = None
     round_obj: RoundSchema | None = None
     referee: ProfileSchema | None = None
-    events: list[EventSchema] = []
-
-    class Meta:
-        model = Match
-        fields = '__all__'
+    team1_score: int = 0
+    team2_score: int = 0
+    team1_yellow_cards: int = 0
+    team2_yellow_cards: int = 0
+    team1_red_cards: int = 0
+    team2_red_cards: int = 0
 
 class StandingSchema(Schema):
     id: int
@@ -67,6 +70,7 @@ class StandingSchema(Schema):
     kapott: int
     golarany: int
     points: int
+    position: int
 
 
 class TopScorerSchema(Schema):
