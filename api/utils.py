@@ -1,4 +1,5 @@
-from .models import Match
+from .models import Match, Tournament
+from django.shortcuts import get_object_or_404
 
 
 def get_team_rank(bajnoksag, keresett_csapat_nev):
@@ -175,5 +176,31 @@ def csapat_pontkiosztas(csapatok, csapat, lott, kapott):
         team['ties'] += 1
     else:
         team['losses'] += 1
+
+
+def get_latest_tournament():
+    """
+    Returns the latest tournament based on start_date, falling back to creation order if no start_date.
+    Raises 404 if no tournaments exist.
+    """
+    try:
+        # Try to get the latest tournament by start_date (most recent first)
+        tournament = Tournament.objects.filter(start_date__isnull=False).order_by('-start_date').first()
+        
+        if tournament:
+            return tournament
+            
+        # If no tournaments have start_date, get the most recently created one
+        tournament = Tournament.objects.order_by('-id').first()
+        
+        if tournament:
+            return tournament
+            
+        # If no tournaments exist at all, raise 404
+        raise Tournament.DoesNotExist()
+        
+    except Tournament.DoesNotExist:
+        # Convert to 404 error for API consumers
+        raise get_object_or_404(Tournament, id=0)  # This will always raise 404
 
 

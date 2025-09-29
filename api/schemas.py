@@ -54,7 +54,6 @@ class TeamSchema(ModelSchema):
         fields = '__all__'
 
 class TeamCreateSchema(Schema):
-    tournament_id: int
     name: str | None = None
     start_year: int
     tagozat: str

@@ -1,0 +1,49 @@
+# Team Registration Data
+# Format: year,class,team_name,captain_name,player1,player2,player3,player4,player5,player6,player7,player8,player9,player10
+# Lines starting with # are comments and will be ignored
+# Empty fields are allowed - just leave them empty between commas
+
+# 23F Team
+23,F,,Kátai Kornél,Geibinger Félix,Csomós Dávid,Bozsóki Áron,Mechler Dénes,Kocsis Fecó,Kecskeméti Mátyás,Kollár Milán,,,
+
+# 21E Team  
+21,E,,Reznák-Iskander Botond,Pesti Márton,Kovács Bence,Fain Laszlo,Réti Szasza,Ye Daniel,Szilaski Ádám,Geicsnek Ádám,,
+
+# 22F Team
+22,F,,Szántai Csanád,Vincze Dániel,Gere Lukács,Töreky Gergő,Balázs Ádám,Previák Richárd,Eigner Krisztián,Tatai Ádám,Minko Marcell,,
+
+# 21A Team (12.A)
+21,A,12.A,Szabó Marcell,Tóbiás Levente,Szalay Tamás,Raffay Kristóf,Stróbli Benjamin,Baran Bertalan,Bordás Péter,,,
+
+# 24A Team (24NY)
+24,A,24NY,McKie James,Kovács András Márton,Megyeri Martin,Varga Sebestyén,Raffay Zétény,Gyuros-Rosivall Ábel,Fényes Marcell,Péterfi Dénes,Stepán Samu
+
+# 24B Team (Trianon FC)
+24,B,Trianon FC,Molnár Botond,Majsai Máté,Deli Botond,Nagy Levente,Kozma Domonkos,Bercez Bálint,Nagy Ferenc,Simon Ákos,Matlák Bálint,Karminás Zolta
+
+# 21F Team (Fegyencváros)
+21,F,Fegyencváros,Farkas Péter,Mamira Máté Márk,Ács Péter Levente,Ekker Máté,Nagy Gergely,Viniczei Viktor,Koncz Máté,Fodor Péter,Kardos Áron Tóbiás,Novák Simon
+
+# 25F Team (Shaolin FC)
+25,F,Shaolin FC,Simák Boldizsár,Levente Gábor,Vincze Zoltán,Bánóczi Áron,Gelencsér Bence,Szabó-Aross Misa,Kaldau Sebestyén,,Mikuska Botond,Gajdos Zétény
+
+# 22B Team (Hortobágyi FC)
+22,B,Hortobágyi FC,Zemen Zalán,Almási Attila István,Pákozdi Artúr Ferenc,Boronyai Dániel,Valentin Bendegúz,Gerzsényi Endre,Mécs Martin,Gayer Borisz,Varga Levente,Gagyi Ábel
+
+# 24D Team (Al Föld FC) - Note: Some entries were email addresses, converted to names
+24,D,Al Föld FC,Péczely Patrik,Frühwirth Bence,Fürész Mátyás,Tóth-Varsányi Zétény,Balogh Levente,Tamási András,Máthé Patrik,Varga Zsombor,Berecz Szilárd,Martits Gergő
+
+# 23B Team
+23,B,,Fias Máté,Gégény Bence,Rozmanitz Gergő,Pelle Péter,Fábián Dániel,Ngo Xuan Nguyen,Réti Benedek,Zsák Balázs,Drágus Attila,Gábor Marcell
+
+# 22A Team (Rémisztő Pénisztő)
+22,A,Rémisztő Pénisztő,Minkó Marcell,Minkó Marcell,Fedor Levente,Szimeonov Áron,Őrlős Dániel,Brugnara Erik Josef,Hegedűs Martin,Kemecsey Ferenc Áron,Polákovits Miklós,Nemes Milán Gellért
+
+# 25F Team (Zs csapat)
+25,F,Zs csapat,Kavács Donát,Kiss Benedek,Bagoly-Kis Ákos,Pusztai Zsombor,Fülöp Ádám Tamás,Farnady Botond,Lengyel Ákos,Szalma-Baksi Ábel,Gál Bercell,,
+
+# 24C Team (24C)
+24,C,24C,Kálmán Roland,Szabadi Zalán,Nagy Bálint,Kiss Domonkos,Mikola Máté,Nagy Sándor,Chen Xianting,Berényi Soma,Béres Marcell,Bolla-Vakály Márton
+
+# 23E Team
+23,E,,Gera Sándor,Pozsonyi Bálint,Csata Péter,Acsai Zalán,Ujlakán Farkas,Tief Géza,Zongor Szablocs,Szabó Bence,Dudás-Györki Csaba,Zomborcsevics Mirkó
