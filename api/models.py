@@ -154,7 +154,7 @@ class Event(models.Model):
     ]
 
     event_type = models.CharField(max_length=20, choices=EVENT_TYPES)
-    half = models.IntegerField(choices=[(1, '1st Half'), (2, '2nd Half')])
+    half = models.IntegerField(choices=[(1, '1st Half'), (2, '2nd Half')], null=True, blank=True)
     minute = models.IntegerField()
     minute_extra_time = models.IntegerField(null=True, blank=True)
 
