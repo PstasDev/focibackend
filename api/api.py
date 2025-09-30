@@ -693,23 +693,23 @@ def get_round_by_id(request, round_id: int):
 # Közlemények
 
 # Minden közlemény lekérdezése
-@router.get("/announcements", response=list[KozlemenySchema])
+@router.get("/kozlemenyek", response=list[KozlemenySchema])
 def get_kozlemenyek(request):
     return Kozlemeny.objects.all().order_by('-priority', '-date_created')
 
 # Aktív közlemények lekérdezése
-@router.get("/announcements/active", response=list[KozlemenySchema])
+@router.get("/kozlemenyek/active", response=list[KozlemenySchema])
 def get_active_kozlemenyek(request):
     return Kozlemeny.objects.filter(active=True).order_by('-priority', '-date_created')
 
 # Közlemény lekérdezése ID alapján
-@router.get("/announcements/{kozlemeny_id}", response=KozlemenySchema)
+@router.get("/kozlemenyek/{kozlemeny_id}", response=KozlemenySchema)
 def get_kozlemeny(request, kozlemeny_id: int):
     kozlemeny = get_object_or_404(Kozlemeny, id=kozlemeny_id)
     return kozlemeny
 
 # Prioritás alapján közlemények lekérdezése
-@router.get("/announcements/priority/{priority}", response=list[KozlemenySchema])
+@router.get("/kozlemenyek/priority/{priority}", response=list[KozlemenySchema])
 def get_kozlemenyek_by_priority(request, priority: str):
     valid_priorities = ['low', 'normal', 'high', 'urgent']
     if priority not in valid_priorities:
@@ -717,14 +717,14 @@ def get_kozlemenyek_by_priority(request, priority: str):
     return Kozlemeny.objects.filter(priority=priority, active=True).order_by('-date_created')
 
 # # Új közlemény létrehozása
-# @router.post("/announcements", response=KozlemenySchema)
+# @router.post("/kozlemenyek", response=KozlemenySchema)
 # def create_kozlemeny(request, payload: KozlemenyCreateSchema):
 #     kozlemeny_data = payload.dict()
 #     kozlemeny = Kozlemeny.objects.create(**kozlemeny_data)
 #     return kozlemeny
 
 # # Közlemény frissítése
-# @router.put("/announcements/{kozlemeny_id}", response=KozlemenySchema)
+# @router.put("/kozlemenyek/{kozlemeny_id}", response=KozlemenySchema)
 # def update_kozlemeny(request, kozlemeny_id: int, payload: KozlemenyUpdateSchema):
 #     kozlemeny = get_object_or_404(Kozlemeny, id=kozlemeny_id)
     
@@ -737,7 +737,7 @@ def get_kozlemenyek_by_priority(request, priority: str):
 #     return kozlemeny
 
 # # Közlemény részleges frissítése
-# @router.patch("/announcements/{kozlemeny_id}", response=KozlemenySchema)
+# @router.patch("/kozlemenyek/{kozlemeny_id}", response=KozlemenySchema)
 # def patch_kozlemeny(request, kozlemeny_id: int, payload: KozlemenyUpdateSchema):
 #     kozlemeny = get_object_or_404(Kozlemeny, id=kozlemeny_id)
     
@@ -750,7 +750,7 @@ def get_kozlemenyek_by_priority(request, priority: str):
 #     return kozlemeny
 
 # # Közlemény deaktiválása
-# @router.patch("/announcements/{kozlemeny_id}/deactivate")
+# @router.patch("/kozlemenyek/{kozlemeny_id}/deactivate")
 # def deactivate_kozlemeny(request, kozlemeny_id: int):
 #     kozlemeny = get_object_or_404(Kozlemeny, id=kozlemeny_id)
 #     kozlemeny.active = False
@@ -758,7 +758,7 @@ def get_kozlemenyek_by_priority(request, priority: str):
 #     return {"message": "Közlemény deaktiválva"}
 
 # # Közlemény aktiválása
-# @router.patch("/announcements/{kozlemeny_id}/activate")
+# @router.patch("/kozlemenyek/{kozlemeny_id}/activate")
 # def activate_kozlemeny(request, kozlemeny_id: int):
 #     kozlemeny = get_object_or_404(Kozlemeny, id=kozlemeny_id)
 #     kozlemeny.active = True
