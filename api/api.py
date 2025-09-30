@@ -6,11 +6,107 @@ from django.shortcuts import get_object_or_404
 from django.db import models
 from .utils import process_matches, get_goal_scorers, get_latest_tournament
 from datetime import datetime
+from django.utils import timezone
+from django.contrib.auth import authenticate
+from django.http import JsonResponse
+from .auth import JWTAuth, jwt_required, admin_required, biro_required
 
 
 app = NinjaAPI()
 router = Router()
+admin_router = Router()
 app.add_router("/", router) 
+app.add_router("/admin", admin_router) 
+
+# Authentication endpoints
+
+@router.post("/auth/login", response=LoginResponseSchema)
+def login(request, payload: LoginSchema):
+    """
+    Login endpoint that validates credentials and returns JWT token in cookie
+    """
+    username = payload.username
+    password = payload.password
+    
+    # Authenticate user
+    user = authenticate(username=username, password=password)
+    
+    if user is not None:
+        if user.is_active:
+            # Generate JWT token
+            token = JWTAuth.encode_token(user.id, user.username)
+            
+            # Create response
+            response_data = LoginResponseSchema(
+                success=True,
+                message="Login successful",
+                user=UserSchema.from_orm(user)
+            )
+            
+            # Create response and set cookie
+            response = JsonResponse(response_data.dict())
+            response.set_cookie(
+                'auth_token',
+                token,
+                max_age=86400,  # 24 hours
+                httponly=True,  # Prevent XSS
+                secure=False,   # Set to True in production with HTTPS
+                samesite='Lax'  # CSRF protection
+            )
+            
+            return response
+        else:
+            return LoginResponseSchema(
+                success=False,
+                message="Account is disabled",
+                user=None
+            )
+    else:
+        return LoginResponseSchema(
+            success=False,
+            message="Invalid username or password",
+            user=None
+        )
+
+@router.post("/auth/logout", response=LogoutResponseSchema)
+def logout(request):
+    """
+    Logout endpoint that clears the auth token cookie
+    """
+    response_data = LogoutResponseSchema(
+        success=True,
+        message="Logout successful"
+    )
+    
+    response = JsonResponse(response_data.dict())
+    response.delete_cookie('auth_token')
+    
+    return response
+
+@router.get("/auth/status", response=AuthStatusSchema)
+def auth_status(request):
+    """
+    Check authentication status of current user
+    """
+    token = request.COOKIES.get('auth_token')
+    
+    if not token:
+        return AuthStatusSchema(
+            authenticated=False,
+            user=None
+        )
+    
+    user = JWTAuth.verify_token(token)
+    if user:
+        return AuthStatusSchema(
+            authenticated=True,
+            user=UserSchema.from_orm(user)
+        )
+    else:
+        return AuthStatusSchema(
+            authenticated=False,
+            user=None
+        ) 
 
 # Felhasználók
 @router.get("/users/{user_id}", response=UserSchema)
@@ -300,7 +396,8 @@ def get_player_events(request, player_id: int):
  
 
 # Minden csapat lekérdezése (minden bajnokságból) - admin use
-@router.get("/admin/teams/all", response=list[TeamExtendedSchema])
+@admin_router.get("/teams/all", response=list[TeamExtendedSchema])
+@admin_required
 def get_all_teams(request):
     teams = Team.objects.all()
     return [
@@ -326,7 +423,8 @@ def get_all_teams(request):
     ]
 
 # Csapat lekérdezése (admin - bármely bajnokságból)
-@router.get("/admin/teams/{team_id}", response=TeamExtendedSchema)
+@admin_router.get("/teams/{team_id}", response=TeamExtendedSchema)
+@admin_required
 def get_any_team(request, team_id: int):
     team = get_object_or_404(Team, id=team_id)
     return TeamExtendedSchema(
@@ -515,7 +613,8 @@ def get_team_events(request, team_id: int):
     )  
 
 # Csapat játékosai (admin - bármely bajnokságból)
-@router.get("/admin/teams/{team_id}/players", response=list[PlayerExtendedSchema])
+@admin_router.get("/teams/{team_id}/players", response=list[PlayerExtendedSchema])
+@admin_required
 def get_any_team_players(request, team_id: int):
     team = get_object_or_404(Team, id=team_id)
     players = team.players.all()
@@ -533,7 +632,8 @@ def get_any_team_players(request, team_id: int):
 
 
 # Minden player lekérdezése (admin - minden bajnokságból)
-@router.get("/admin/players/all", response=list[PlayerExtendedSchema])
+@admin_router.get("/players/all", response=list[PlayerExtendedSchema])
+@admin_required
 def get_all_players(request):
     players = Player.objects.all()
     return [
@@ -549,7 +649,8 @@ def get_all_players(request):
     ]
 
 # Player lekérdezése (admin - bármely bajnokságból)
-@router.get("/admin/players/{player_id}", response=PlayerExtendedSchema)
+@admin_router.get("/players/{player_id}", response=PlayerExtendedSchema)
+@admin_required
 def get_any_player(request, player_id: int):
     player = get_object_or_404(Player, id=player_id)
     return PlayerExtendedSchema(
@@ -579,7 +680,8 @@ def get_captains(request):
     ]
 
 # Player összes eventje (admin - minden bajnokságból)
-@router.get("/admin/players/{player_id}/events", response=AllEventsSchema)
+@admin_router.get("/players/{player_id}/events", response=AllEventsSchema)
+@admin_required
 def get_all_player_events(request, player_id: int):
     player = get_object_or_404(Player, id=player_id)
     # Get all events for this player from all matches
@@ -612,7 +714,8 @@ def get_referee_profiles(request):
 
 
 # Minden meccs lekérdezése (admin - minden bajnokságból)
-@router.get("/admin/matches/all", response=list[MatchSchema])
+@admin_router.get("/matches/all", response=list[MatchSchema])
+@admin_required
 def get_all_matches(request):
     return Match.objects.all()
 
@@ -629,7 +732,8 @@ def get_referee_matches(request, profile_id: int):
     return Match.objects.filter(referee=profile)
 
 # Minden gól lekérdezése (admin - minden bajnokságból)
-@router.get("/admin/goals/all", response=list[EventSchema])
+@admin_router.get("/goals/all", response=list[EventSchema])
+@admin_required
 def get_all_goals_admin(request):
     goals = Event.objects.filter(event_type='goal')
     return goals
@@ -642,7 +746,8 @@ def get_goal(request, goal_id: int):
 
 
 # Sárga lapok lekérdezése (admin - minden bajnokságból)
-@router.get("/admin/yellow_cards/all", response=list[EventSchema])
+@admin_router.get("/yellow_cards/all", response=list[EventSchema])
+@admin_required
 def get_all_yellow_cards_admin(request):
     cards = Event.objects.filter(event_type='yellow_card')
     return cards
@@ -655,7 +760,8 @@ def get_card(request, card_id: int):
 
 
 # Piros lapok lekérdezése (admin - minden bajnokságból)
-@router.get("/admin/red_cards/all", response=list[EventSchema])
+@admin_router.get("/red_cards/all", response=list[EventSchema])
+@admin_required
 def get_all_red_cards_admin(request):
     cards = Event.objects.filter(event_type='red_card')
     return cards
@@ -699,12 +805,14 @@ def get_match_red_cards(request, match_id: int):
     return match.events.filter(event_type='red_card')
 
 # Minden forduló lekérdezése (admin)
-@router.get("/admin/rounds/all", response=list[RoundSchema])
+@admin_router.get("/rounds/all", response=list[RoundSchema])
+@admin_required
 def get_all_rounds(request):
     return Round.objects.all().order_by('tournament', 'number')
 
 # Forduló lekérdezése ID alapján (admin)
-@router.get("/admin/rounds/{round_id}", response=RoundSchema)
+@admin_router.get("/rounds/{round_id}", response=RoundSchema)
+@admin_required
 def get_round_by_id(request, round_id: int):
     round_obj = get_object_or_404(Round, id=round_id)
     return round_obj
@@ -783,4 +891,18 @@ def get_kozlemenyek_by_priority(request, priority: str):
 #     kozlemeny.active = True
 #     kozlemeny.save()
 #     return {"message": "Közlemény aktiválva"}
+
+# Time sync endpoint for frontend synchronization
+@router.get("/time", response=TimeSyncSchema)
+def get_server_time(request):
+    """
+    Returns the current server time for frontend synchronization.
+    Useful for ensuring consistent timestamps and time-based operations.
+    """
+    now = timezone.now()
+    return TimeSyncSchema(
+        server_time=now.isoformat(),
+        timezone=str(timezone.get_current_timezone()),
+        timestamp=int(now.timestamp())
+    )
 

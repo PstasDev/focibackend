@@ -66,6 +66,7 @@ class Team(models.Model):
 
     registration_time = models.DateTimeField(auto_now_add=True, null=True, blank=True)
     active = models.BooleanField(default=True)
+    logo_url = models.URLField(null=True, blank=True)
 
     def get_team_color(self):
         """
@@ -121,6 +122,7 @@ class Match(models.Model):
     round_obj = models.ForeignKey('Round', on_delete=models.CASCADE)
 
     events = models.ManyToManyField('Event', blank=True)
+    photos = models.ManyToManyField('Photo', blank=True, verbose_name="Match Photos")
 
     referee = models.ForeignKey('Profile', null=True, blank=True, on_delete=models.SET_NULL)
 
@@ -166,6 +168,18 @@ class Event(models.Model):
 
     def __str__(self):
         return f"{self.get_event_type_display()} by {self.player} at {self.minute}'"
+
+class Photo(models.Model):
+    url = models.URLField(verbose_name="Photo URL")
+    date_uploaded = models.DateTimeField(auto_now_add=True, verbose_name="Upload Date")
+
+    class Meta:
+        verbose_name = "Photo"
+        verbose_name_plural = "Photos"
+        ordering = ['-date_uploaded']
+
+    def __str__(self):
+        return self.title or f"Photo {self.id}"
 
 # Közlemények
 

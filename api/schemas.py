@@ -1,5 +1,5 @@
 from ninja import ModelSchema, Schema
-from .models import Team, Tournament, Match, Event, Player, Profile, Round, Kozlemeny
+from .models import Team, Tournament, Match, Event, Player, Profile, Round, Kozlemeny, Photo
 from django.contrib.auth.models import User
 
 class UserSchema(ModelSchema):
@@ -35,6 +35,7 @@ class TeamExtendedSchema(Schema):
     start_year: int
     tagozat: str
     color: str  # Always returns computed color from get_team_color()
+    logo_url: str | None = None
     active: bool
     players: list[PlayerExtendedSchema] = []
 
@@ -78,6 +79,7 @@ class TeamCreateSchema(Schema):
     start_year: int
     tagozat: str
     color: str | None = None
+    logo_url: str | None = None
     active: bool = True
 
 class TeamUpdateSchema(Schema):
@@ -85,6 +87,7 @@ class TeamUpdateSchema(Schema):
     start_year: int | None = None
     tagozat: str | None = None
     color: str | None = None
+    logo_url: str | None = None
     active: bool | None = None
 
 class EventSchema(ModelSchema):
@@ -95,6 +98,25 @@ class EventSchema(ModelSchema):
         model = Event
         fields = '__all__'
 
+# Photo schemas
+
+class PhotoSchema(ModelSchema):
+    uploaded_by: ProfileSchema | None = None
+
+    class Meta:
+        model = Photo
+        fields = '__all__'
+
+class PhotoCreateSchema(Schema):
+    url: str
+    title: str | None = None
+    description: str | None = None
+
+class PhotoUpdateSchema(Schema):
+    url: str | None = None
+    title: str | None = None
+    description: str | None = None
+
 class MatchSchema(ModelSchema):
     team1: TeamSchema | None = None
     team2: TeamSchema | None = None
@@ -102,6 +124,7 @@ class MatchSchema(ModelSchema):
     round_obj: RoundSchema | None = None
     referee: ProfileSchema | None = None
     events: list[EventSchema] = []
+    photos: list[PhotoSchema] = []
 
     class Meta:
         model = Match
@@ -150,4 +173,30 @@ class KozlemenyUpdateSchema(Schema):
     content: str | None = None
     active: bool | None = None
     priority: str | None = None
+
+# Time sync schema
+
+class TimeSyncSchema(Schema):
+    server_time: str  # ISO format datetime string
+    timezone: str     # Server timezone
+    timestamp: int    # Unix timestamp
+
+# Authentication schemas
+
+class LoginSchema(Schema):
+    username: str
+    password: str
+
+class LoginResponseSchema(Schema):
+    success: bool
+    message: str
+    user: UserSchema | None = None
+
+class LogoutResponseSchema(Schema):
+    success: bool
+    message: str
+
+class AuthStatusSchema(Schema):
+    authenticated: bool
+    user: UserSchema | None = None
 
