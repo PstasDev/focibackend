@@ -89,6 +89,7 @@ class TeamUpdateSchema(Schema):
 
 class EventSchema(ModelSchema):
     player: PlayerSchema | None = None
+    match: 'MatchSchema | None' = None
 
     class Meta:
         model = Event

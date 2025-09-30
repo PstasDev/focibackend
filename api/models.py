@@ -154,7 +154,10 @@ class Event(models.Model):
     ]
 
     event_type = models.CharField(max_length=20, choices=EVENT_TYPES)
+    half = models.IntegerField(choices=[(1, '1st Half'), (2, '2nd Half')])
     minute = models.IntegerField()
+    minute_extra_time = models.IntegerField(null=True, blank=True)
+
     exact_time = models.DateTimeField(null=True, blank=True)
 
     # Depending on event_type, player may be null (e.g., match_start)

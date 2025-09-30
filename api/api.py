@@ -193,7 +193,10 @@ def get_team_matches(request, team_id: int):
 def get_top_scorers(request):
     tournament = get_latest_tournament()
     matches = Match.objects.filter(tournament=tournament)
-    goals = Event.objects.filter(event_type='goal').filter(match__in=matches)
+    # Get all goal events from all matches in the tournament
+    goals = []
+    for match in matches:
+        goals.extend(match.events.filter(event_type='goal'))
     return get_goal_scorers(goals)
 
 # Fordulók (legújabb bajnokság)
@@ -221,7 +224,9 @@ def get_round_matches(request, round_number: int):
 def get_goals(request):
     tournament = get_latest_tournament()
     matches = Match.objects.filter(tournament=tournament)
-    goals = Event.objects.filter(event_type='goal').filter(match__in=matches)
+    goals = []
+    for match in matches:
+        goals.extend(match.events.filter(event_type='goal'))
     return goals
 
 # Összes sárga lap (legújabb bajnokság)
@@ -229,7 +234,9 @@ def get_goals(request):
 def get_yellow_cards(request):
     tournament = get_latest_tournament()
     matches = Match.objects.filter(tournament=tournament)
-    yellow_cards = Event.objects.filter(event_type='yellow_card').filter(match__in=matches)
+    yellow_cards = []
+    for match in matches:
+        yellow_cards.extend(match.events.filter(event_type='yellow_card'))
     return yellow_cards
 
 # Összes piros lap (legújabb bajnokság)
@@ -237,7 +244,9 @@ def get_yellow_cards(request):
 def get_red_cards(request):
     tournament = get_latest_tournament()
     matches = Match.objects.filter(tournament=tournament)
-    red_cards = Event.objects.filter(event_type='red_card').filter(match__in=matches)
+    red_cards = []
+    for match in matches:
+        red_cards.extend(match.events.filter(event_type='red_card'))
     return red_cards
 
 # Összes játékos (legújabb bajnokság)
@@ -278,12 +287,15 @@ def get_player_events(request, player_id: int):
     tournament = get_latest_tournament()
     player = get_object_or_404(Player, id=player_id, team__tournament=tournament)
     matches = Match.objects.filter(tournament=tournament)
-    events = Event.objects.filter(player=player).filter(match__in=matches)
+    # Get all events for this player from tournament matches
+    all_events = []
+    for match in matches:
+        all_events.extend(match.events.filter(player=player))
 
     return AllEventsSchema(
-        goals=events.filter(event_type="goal"),
-        yellow_cards=events.filter(event_type="yellow_card"),
-        red_cards=events.filter(event_type="red_card"),
+        goals=[event for event in all_events if event.event_type == "goal"],
+        yellow_cards=[event for event in all_events if event.event_type == "yellow_card"],
+        red_cards=[event for event in all_events if event.event_type == "red_card"],
     )
  
 
@@ -491,12 +503,15 @@ def get_team_events(request, team_id: int):
     matches = Match.objects.filter(tournament=tournament).filter(
         models.Q(team1=team) | models.Q(team2=team)
     )
-    events = Event.objects.filter(match__in=matches)
+    # Get all events from matches this team played in
+    all_events = []
+    for match in matches:
+        all_events.extend(match.events.all())
 
     return AllEventsSchema(
-        goals=events.filter(event_type="goal"),
-        yellow_cards=events.filter(event_type="yellow_card"),
-        red_cards=events.filter(event_type="red_card"),
+        goals=[event for event in all_events if event.event_type == "goal"],
+        yellow_cards=[event for event in all_events if event.event_type == "yellow_card"],
+        red_cards=[event for event in all_events if event.event_type == "red_card"],
     )  
 
 # Csapat játékosai (admin - bármely bajnokságból)
@@ -567,12 +582,16 @@ def get_captains(request):
 @router.get("/admin/players/{player_id}/events", response=AllEventsSchema)
 def get_all_player_events(request, player_id: int):
     player = get_object_or_404(Player, id=player_id)
-    events = Event.objects.filter(player=player)
+    # Get all events for this player from all matches
+    all_events = []
+    all_matches = Match.objects.all()
+    for match in all_matches:
+        all_events.extend(match.events.filter(player=player))
 
     return AllEventsSchema(
-        goals=events.filter(event_type="goal"),
-        yellow_cards=events.filter(event_type="yellow_card"),
-        red_cards=events.filter(event_type="red_card"),
+        goals=[event for event in all_events if event.event_type == "goal"],
+        yellow_cards=[event for event in all_events if event.event_type == "yellow_card"],
+        red_cards=[event for event in all_events if event.event_type == "red_card"],
     )
 
 # Minden profil lekérdezése
@@ -662,9 +681,9 @@ def get_match_events(request, match_id: int):
     events = match.events.all()
 
     return AllEventsSchema(
-        goals=events.filter(event_type="goal"),
-        yellow_cards=events.filter(event_type="yellow_card"),
-        red_cards=events.filter(event_type="red_card"),
+        goals=[event for event in events if event.event_type == "goal"],
+        yellow_cards=[event for event in events if event.event_type == "yellow_card"],
+        red_cards=[event for event in events if event.event_type == "red_card"],
     )
 
 # Meccs sárga lapok
