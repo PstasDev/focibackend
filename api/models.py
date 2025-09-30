@@ -16,6 +16,32 @@ class Profile(models.Model):
 class Player(models.Model):
     name = models.CharField(max_length=100)
     csk = models.BooleanField(default=False) # Csapatkapitány
+    
+    # Optional player-specific data, falls back to team data if empty
+    start_year = models.IntegerField(null=True, blank=True)
+    tagozat = models.CharField(max_length=100, blank=True, null=True)
+
+    def get_start_year(self):
+        """
+        Returns player's start year if set, otherwise returns team's start year.
+        """
+        if self.start_year:
+            return self.start_year
+        
+        # Get the first team this player belongs to
+        team = self.team_set.first()
+        return team.start_year if team else None
+
+    def get_tagozat(self):
+        """
+        Returns player's tagozat if set, otherwise returns team's tagozat.
+        """
+        if self.tagozat:
+            return self.tagozat
+        
+        # Get the first team this player belongs to
+        team = self.team_set.first()
+        return team.tagozat if team else None
 
     def get_stats(self):
         matches = Match.objects.filter(models.Q(team1__players=self) | models.Q(team2__players=self))
@@ -36,9 +62,31 @@ class Team(models.Model):
     name = models.CharField(max_length=200, blank=True, null=True)
     start_year = models.IntegerField()
     tagozat = models.CharField(max_length=100)
+    color = models.CharField(max_length=7, blank=True, null=True, help_text="Custom team color in hex format (e.g., #FF5733)")
 
     registration_time = models.DateTimeField(auto_now_add=True, null=True, blank=True)
     active = models.BooleanField(default=True)
+
+    def get_team_color(self):
+        """
+        Returns custom team color if set, otherwise returns default color based on tagozat.
+        """
+        if self.color:
+            return self.color
+        
+        # Extract the class letter from tagozat (assuming first character)
+        class_letter = self.tagozat[0].upper() if self.tagozat else ''
+        
+        color_map = {
+            'A': '#66bb6a',  # Brighter green for better contrast
+            'B': '#ffca28',  # Brighter yellow for better contrast
+            'C': '#ba68c8',  # Brighter purple for better contrast
+            'D': '#ef5350',  # Brighter red for better contrast
+            'E': '#bdbdbd',  # Lighter gray for better contrast
+            'F': '#5c6bc0',  # Brighter navy blue for better contrast
+        }
+        
+        return color_map.get(class_letter, '#42a5f5')  # Brighter default blue
 
     def __str__(self):
         if self.name:
@@ -115,3 +163,29 @@ class Event(models.Model):
 
     def __str__(self):
         return f"{self.get_event_type_display()} by {self.player} at {self.minute}'"
+
+# Közlemények
+
+class Kozlemeny(models.Model):
+    PRIORITY_CHOICES = [
+        ('low', 'Alacsony'),
+        ('normal', 'Normál'),
+        ('high', 'Magas'),
+        ('urgent', 'Sürgős'),
+    ]
+
+    title = models.CharField(max_length=200, verbose_name="Cím")
+    content = models.TextField(verbose_name="Tartalom")
+    date_created = models.DateTimeField(auto_now_add=True, verbose_name="Létrehozás ideje")
+    date_updated = models.DateTimeField(auto_now=True, verbose_name="Módosítás ideje")
+    active = models.BooleanField(default=True, verbose_name="Aktív")
+    priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default='normal', verbose_name="Prioritás")
+    author = models.ForeignKey('Profile', on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Szerző")
+
+    class Meta:
+        verbose_name = "Közlemény"
+        verbose_name_plural = "Közlemények"
+        ordering = ['-priority', '-date_created']
+
+    def __str__(self):
+        return self.title

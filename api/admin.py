@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
-from .models import Profile, Player, Team, Tournament, Round, Match, Event
+from .models import Profile, Player, Team, Tournament, Round, Match, Event, Kozlemeny
 
 # Admin Site Customization
 admin.site.site_header = "Foci Liga Adminisztráció"
@@ -111,6 +111,67 @@ class EventAdmin(admin.ModelAdmin):
     list_filter = ('event_type', 'exact_time')
     search_fields = ('player__name',)
 
+class KozlemenyAdmin(admin.ModelAdmin):
+    list_display = ('title', 'get_priority_display', 'active', 'author', 'date_created', 'date_updated')
+    list_filter = ('active', 'priority', 'date_created', 'author')
+    search_fields = ('title', 'content')
+    readonly_fields = ('date_created', 'date_updated')
+    ordering = ('-priority', '-date_created')
+    
+    fieldsets = (
+        ('Alapvető információk', {
+            'fields': ('title', 'content', 'author')
+        }),
+        ('Beállítások', {
+            'fields': ('active', 'priority')
+        }),
+        ('Dátumok', {
+            'fields': ('date_created', 'date_updated'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def get_priority_display(self, obj):
+        priority_colors = {
+            'low': '#28a745',      # Green
+            'normal': '#6c757d',   # Gray
+            'high': '#fd7e14',     # Orange
+            'urgent': '#dc3545',   # Red
+        }
+        color = priority_colors.get(obj.priority, '#6c757d')
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">● {}</span>',
+            color,
+            obj.get_priority_display()
+        )
+    get_priority_display.short_description = 'Prioritás'
+    
+    def get_queryset(self, request):
+        # Order by priority and creation date
+        return super().get_queryset(request).order_by('-priority', '-date_created')
+    
+    actions = ['make_active', 'make_inactive', 'set_priority_high', 'set_priority_urgent']
+    
+    def make_active(self, request, queryset):
+        updated = queryset.update(active=True)
+        self.message_user(request, f'{updated} közlemény aktiválva.')
+    make_active.short_description = "Kiválasztott közlemények aktiválása"
+    
+    def make_inactive(self, request, queryset):
+        updated = queryset.update(active=False)
+        self.message_user(request, f'{updated} közlemény deaktiválva.')
+    make_inactive.short_description = "Kiválasztott közlemények deaktiválása"
+    
+    def set_priority_high(self, request, queryset):
+        updated = queryset.update(priority='high')
+        self.message_user(request, f'{updated} közlemény prioritása magasra állítva.')
+    set_priority_high.short_description = "Prioritás beállítása: Magas"
+    
+    def set_priority_urgent(self, request, queryset):
+        updated = queryset.update(priority='urgent')
+        self.message_user(request, f'{updated} közlemény prioritása sürgősre állítva.')
+    set_priority_urgent.short_description = "Prioritás beállítása: Sürgős"
+
 # Register models with enhanced admin classes
 admin.site.register(Profile, ProfileAdmin)
 admin.site.register(Player, PlayerAdmin)
@@ -119,3 +180,4 @@ admin.site.register(Tournament, TournamentAdmin)
 admin.site.register(Round, RoundAdmin)
 admin.site.register(Match, MatchAdmin)
 admin.site.register(Event, EventAdmin)
+admin.site.register(Kozlemeny, KozlemenyAdmin)
