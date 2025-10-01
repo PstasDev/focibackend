@@ -5,25 +5,32 @@ from .schemas import *
 from django.shortcuts import get_object_or_404
 from django.db import models
 from .utils import process_matches, get_goal_scorers, get_latest_tournament
-from datetime import datetime
+from .referee_utils import (
+    get_match_status, validate_event_data, get_half_time_score, 
+    get_match_timeline, get_player_statistics, get_team_statistics,
+    can_referee_edit_match, format_match_time, get_current_match_minute
+)
+from datetime import datetime, timedelta
 from django.utils import timezone
 from django.contrib.auth import authenticate
 from django.http import JsonResponse
-from .auth import JWTAuth, jwt_required, admin_required, biro_required
+from .auth import JWTAuth, jwt_auth, jwt_cookie_auth, admin_auth, biro_auth
 
 
-app = NinjaAPI()
+app = NinjaAPI(csrf=False)  # Disable CSRF for API since we use JWT
 router = Router()
 admin_router = Router()
+biro_router = Router()
 app.add_router("/", router) 
 app.add_router("/admin", admin_router) 
+app.add_router("/biro", biro_router) 
 
 # Authentication endpoints
 
 @router.post("/auth/login", response=LoginResponseSchema)
 def login(request, payload: LoginSchema):
     """
-    Login endpoint that validates credentials and returns JWT token in cookie
+    Login endpoint that validates credentials and returns JWT token
     """
     username = payload.username
     password = payload.password
@@ -36,77 +43,47 @@ def login(request, payload: LoginSchema):
             # Generate JWT token
             token = JWTAuth.encode_token(user.id, user.username)
             
-            # Create response
-            response_data = LoginResponseSchema(
+            # Return response with token
+            return LoginResponseSchema(
                 success=True,
                 message="Login successful",
-                user=UserSchema.from_orm(user)
+                user=UserSchema.from_orm(user),
+                token=token
             )
-            
-            # Create response and set cookie
-            response = JsonResponse(response_data.dict())
-            response.set_cookie(
-                'auth_token',
-                token,
-                max_age=86400,  # 24 hours
-                httponly=True,  # Prevent XSS
-                secure=False,   # Set to True in production with HTTPS
-                samesite='Lax'  # CSRF protection
-            )
-            
-            return response
         else:
             return LoginResponseSchema(
                 success=False,
                 message="Account is disabled",
-                user=None
+                user=None,
+                token=None
             )
     else:
         return LoginResponseSchema(
             success=False,
             message="Invalid username or password",
-            user=None
+            user=None,
+            token=None
         )
 
 @router.post("/auth/logout", response=LogoutResponseSchema)
 def logout(request):
     """
-    Logout endpoint that clears the auth token cookie
+    Logout endpoint - with token-based auth, logout is handled client-side
     """
-    response_data = LogoutResponseSchema(
+    return LogoutResponseSchema(
         success=True,
         message="Logout successful"
     )
-    
-    response = JsonResponse(response_data.dict())
-    response.delete_cookie('auth_token')
-    
-    return response
 
-@router.get("/auth/status", response=AuthStatusSchema)
+@router.get("/auth/status", response=AuthStatusSchema, auth=jwt_cookie_auth)
 def auth_status(request):
     """
     Check authentication status of current user
     """
-    token = request.COOKIES.get('auth_token')
-    
-    if not token:
-        return AuthStatusSchema(
-            authenticated=False,
-            user=None
-        )
-    
-    user = JWTAuth.verify_token(token)
-    if user:
-        return AuthStatusSchema(
-            authenticated=True,
-            user=UserSchema.from_orm(user)
-        )
-    else:
-        return AuthStatusSchema(
-            authenticated=False,
-            user=None
-        ) 
+    return AuthStatusSchema(
+        authenticated=True,
+        user=UserSchema.from_orm(request.auth)
+    ) 
 
 # Felhasználók
 @router.get("/users/{user_id}", response=UserSchema)
@@ -396,8 +373,7 @@ def get_player_events(request, player_id: int):
  
 
 # Minden csapat lekérdezése (minden bajnokságból) - admin use
-@admin_router.get("/teams/all", response=list[TeamExtendedSchema])
-@admin_required
+@admin_router.get("/teams/all", response=list[TeamExtendedSchema], auth=admin_auth)
 def get_all_teams(request):
     teams = Team.objects.all()
     return [
@@ -423,8 +399,7 @@ def get_all_teams(request):
     ]
 
 # Csapat lekérdezése (admin - bármely bajnokságból)
-@admin_router.get("/teams/{team_id}", response=TeamExtendedSchema)
-@admin_required
+@admin_router.get("/teams/{team_id}", response=TeamExtendedSchema, auth=admin_auth)
 def get_any_team(request, team_id: int):
     team = get_object_or_404(Team, id=team_id)
     return TeamExtendedSchema(
@@ -613,8 +588,7 @@ def get_team_events(request, team_id: int):
     )  
 
 # Csapat játékosai (admin - bármely bajnokságból)
-@admin_router.get("/teams/{team_id}/players", response=list[PlayerExtendedSchema])
-@admin_required
+@admin_router.get("/teams/{team_id}/players", response=list[PlayerExtendedSchema], auth=admin_auth)
 def get_any_team_players(request, team_id: int):
     team = get_object_or_404(Team, id=team_id)
     players = team.players.all()
@@ -632,8 +606,7 @@ def get_any_team_players(request, team_id: int):
 
 
 # Minden player lekérdezése (admin - minden bajnokságból)
-@admin_router.get("/players/all", response=list[PlayerExtendedSchema])
-@admin_required
+@admin_router.get("/players/all", response=list[PlayerExtendedSchema], auth=admin_auth)
 def get_all_players(request):
     players = Player.objects.all()
     return [
@@ -649,8 +622,7 @@ def get_all_players(request):
     ]
 
 # Player lekérdezése (admin - bármely bajnokságból)
-@admin_router.get("/players/{player_id}", response=PlayerExtendedSchema)
-@admin_required
+@admin_router.get("/players/{player_id}", response=PlayerExtendedSchema, auth=admin_auth)
 def get_any_player(request, player_id: int):
     player = get_object_or_404(Player, id=player_id)
     return PlayerExtendedSchema(
@@ -680,8 +652,7 @@ def get_captains(request):
     ]
 
 # Player összes eventje (admin - minden bajnokságból)
-@admin_router.get("/players/{player_id}/events", response=AllEventsSchema)
-@admin_required
+@admin_router.get("/players/{player_id}/events", response=AllEventsSchema, auth=admin_auth)
 def get_all_player_events(request, player_id: int):
     player = get_object_or_404(Player, id=player_id)
     # Get all events for this player from all matches
@@ -714,8 +685,7 @@ def get_referee_profiles(request):
 
 
 # Minden meccs lekérdezése (admin - minden bajnokságból)
-@admin_router.get("/matches/all", response=list[MatchSchema])
-@admin_required
+@admin_router.get("/matches/all", response=list[MatchSchema], auth=admin_auth)
 def get_all_matches(request):
     return Match.objects.all()
 
@@ -732,8 +702,7 @@ def get_referee_matches(request, profile_id: int):
     return Match.objects.filter(referee=profile)
 
 # Minden gól lekérdezése (admin - minden bajnokságból)
-@admin_router.get("/goals/all", response=list[EventSchema])
-@admin_required
+@admin_router.get("/goals/all", response=list[EventSchema], auth=admin_auth)
 def get_all_goals_admin(request):
     goals = Event.objects.filter(event_type='goal')
     return goals
@@ -746,8 +715,7 @@ def get_goal(request, goal_id: int):
 
 
 # Sárga lapok lekérdezése (admin - minden bajnokságból)
-@admin_router.get("/yellow_cards/all", response=list[EventSchema])
-@admin_required
+@admin_router.get("/yellow_cards/all", response=list[EventSchema], auth=admin_auth)
 def get_all_yellow_cards_admin(request):
     cards = Event.objects.filter(event_type='yellow_card')
     return cards
@@ -760,8 +728,7 @@ def get_card(request, card_id: int):
 
 
 # Piros lapok lekérdezése (admin - minden bajnokságból)
-@admin_router.get("/red_cards/all", response=list[EventSchema])
-@admin_required
+@admin_router.get("/red_cards/all", response=list[EventSchema], auth=admin_auth)
 def get_all_red_cards_admin(request):
     cards = Event.objects.filter(event_type='red_card')
     return cards
@@ -805,14 +772,12 @@ def get_match_red_cards(request, match_id: int):
     return match.events.filter(event_type='red_card')
 
 # Minden forduló lekérdezése (admin)
-@admin_router.get("/rounds/all", response=list[RoundSchema])
-@admin_required
+@admin_router.get("/rounds/all", response=list[RoundSchema], auth=admin_auth)
 def get_all_rounds(request):
     return Round.objects.all().order_by('tournament', 'number')
 
 # Forduló lekérdezése ID alapján (admin)
-@admin_router.get("/rounds/{round_id}", response=RoundSchema)
-@admin_required
+@admin_router.get("/rounds/{round_id}", response=RoundSchema, auth=admin_auth)
 def get_round_by_id(request, round_id: int):
     round_obj = get_object_or_404(Round, id=round_id)
     return round_obj
@@ -905,4 +870,765 @@ def get_server_time(request):
         timezone=str(timezone.get_current_timezone()),
         timestamp=int(now.timestamp())
     )
+
+# =============================================================================
+# REFEREE (BÍRÓ) ENDPOINTS - Jegyzőkönyv Management
+# =============================================================================
+
+# Get referee's assigned matches
+@biro_router.get("/my-matches", response=list[MatchSchema], auth=biro_auth)
+def get_referee_matches(request):
+    """
+    Get all matches assigned to the current referee
+    """
+    try:
+        profile = request.auth.profile
+        matches = Match.objects.filter(referee=profile).order_by('datetime')
+        return matches
+    except AttributeError:
+        return []
+
+# Get live matches that referee can manage
+@biro_router.get("/live-matches", response=list[MatchStatusSchema], auth=biro_auth)
+def get_live_matches(request):
+    """
+    Get matches that are currently live or about to start (referee can manage)
+    """
+    try:
+        profile = request.auth.profile
+        now = timezone.now()
+        # Get matches from today and tomorrow that are assigned to this referee
+        matches = Match.objects.filter(
+            referee=profile,
+            datetime__gte=now.replace(hour=0, minute=0, second=0),
+            datetime__lte=now + timedelta(days=1)
+        ).order_by('datetime')
+        
+        match_statuses = []
+        for match in matches:
+            # Determine match status based on events
+            events = match.events.all().order_by('minute', 'id')
+            
+            status = "not_started"
+            if events.filter(event_type='match_start').exists():
+                status = "first_half"
+            if events.filter(event_type='half_time').exists():
+                status = "half_time"
+            if events.filter(event_type='full_time').exists():
+                status = "second_half"
+            if events.filter(event_type='extra_time').exists():
+                status = "extra_time"
+            if events.filter(event_type='match_end').exists():
+                status = "finished"
+            
+            match_statuses.append(MatchStatusSchema(
+                id=match.id,
+                team1=TeamExtendedSchema(
+                    id=match.team1.id,
+                    name=match.team1.name,
+                    start_year=match.team1.start_year,
+                    tagozat=match.team1.tagozat,
+                    color=match.team1.get_team_color(),
+                    active=match.team1.active,
+                    players=[
+                        PlayerExtendedSchema(
+                            id=player.id,
+                            name=player.name,
+                            csk=player.csk,
+                            start_year=player.start_year,
+                            tagozat=player.tagozat,
+                            effective_start_year=player.get_start_year(),
+                            effective_tagozat=player.get_tagozat()
+                        ) for player in match.team1.players.all()
+                    ]
+                ),
+                team2=TeamExtendedSchema(
+                    id=match.team2.id,
+                    name=match.team2.name,
+                    start_year=match.team2.start_year,
+                    tagozat=match.team2.tagozat,
+                    color=match.team2.get_team_color(),
+                    active=match.team2.active,
+                    players=[
+                        PlayerExtendedSchema(
+                            id=player.id,
+                            name=player.name,
+                            csk=player.csk,
+                            start_year=player.start_year,
+                            tagozat=player.tagozat,
+                            effective_start_year=player.get_start_year(),
+                            effective_tagozat=player.get_tagozat()
+                        ) for player in match.team2.players.all()
+                    ]
+                ),
+                datetime=match.datetime.isoformat(),
+                referee=ProfileSchema.from_orm(match.referee) if match.referee else None,
+                events=[EventSchema.from_orm(event) for event in events],
+                score=match.result(),
+                status=status
+            ))
+        
+        return match_statuses
+    except AttributeError:
+        return []
+
+# Get specific match details for referee management
+@biro_router.get("/matches/{match_id}", response=MatchStatusSchema, auth=biro_auth)
+def get_match_for_referee(request, match_id: int):
+    """
+    Get specific match details that referee can manage
+    """
+    try:
+        profile = request.auth.profile
+        match = get_object_or_404(Match, id=match_id, referee=profile)
+        
+        events = match.events.all().order_by('minute', 'id')
+        
+        # Determine match status
+        status = "not_started"
+        if events.filter(event_type='match_start').exists():
+            status = "first_half"
+        if events.filter(event_type='half_time').exists():
+            status = "half_time"
+        if events.filter(event_type='full_time').exists():
+            status = "second_half"
+        if events.filter(event_type='extra_time').exists():
+            status = "extra_time"
+        if events.filter(event_type='match_end').exists():
+            status = "finished"
+        
+        return MatchStatusSchema(
+            id=match.id,
+            team1=TeamExtendedSchema(
+                id=match.team1.id,
+                name=match.team1.name,
+                start_year=match.team1.start_year,
+                tagozat=match.team1.tagozat,
+                color=match.team1.get_team_color(),
+                active=match.team1.active,
+                players=[
+                    PlayerExtendedSchema(
+                        id=player.id,
+                        name=player.name,
+                        csk=player.csk,
+                        start_year=player.start_year,
+                        tagozat=player.tagozat,
+                        effective_start_year=player.get_start_year(),
+                        effective_tagozat=player.get_tagozat()
+                    ) for player in match.team1.players.all()
+                ]
+            ),
+            team2=TeamExtendedSchema(
+                id=match.team2.id,
+                name=match.team2.name,
+                start_year=match.team2.start_year,
+                tagozat=match.team2.tagozat,
+                color=match.team2.get_team_color(),
+                active=match.team2.active,
+                players=[
+                    PlayerExtendedSchema(
+                        id=player.id,
+                        name=player.name,
+                        csk=player.csk,
+                        start_year=player.start_year,
+                        tagozat=player.tagozat,
+                        effective_start_year=player.get_start_year(),
+                        effective_tagozat=player.get_tagozat()
+                    ) for player in match.team2.players.all()
+                ]
+            ),
+            datetime=match.datetime.isoformat(),
+            referee=ProfileSchema.from_orm(match.referee) if match.referee else None,
+            events=[EventSchema.from_orm(event) for event in events],
+            score=match.result(),
+            status=status
+        )
+    except AttributeError:
+        return JsonResponse({'error': 'No profile found'}, status=403)
+
+# Add event to match (live match updates)
+@biro_router.post("/matches/{match_id}/events", response=EventSchema, auth=biro_auth)
+def add_match_event(request, match_id: int, payload: EventCreateSchema):
+    """
+    Add a new event to a match (goals, cards, etc.)
+    """
+    try:
+        profile = request.auth.profile
+        match = get_object_or_404(Match, id=match_id, referee=profile)
+        
+        # Validate event type
+        valid_event_types = [choice[0] for choice in Event.EVENT_TYPES]
+        if payload.event_type not in valid_event_types:
+            return JsonResponse({'error': 'Invalid event type'}, status=400)
+        
+        # Get player if specified
+        player = None
+        if payload.player_id:
+            # Ensure player belongs to one of the teams in this match
+            try:
+                player = Player.objects.get(
+                    id=payload.player_id,
+                    team__in=[match.team1, match.team2]
+                )
+            except Player.DoesNotExist:
+                return JsonResponse({'error': 'Player not found in match teams'}, status=400)
+        
+        # Create event
+        event = Event.objects.create(
+            event_type=payload.event_type,
+            half=payload.half,
+            minute=payload.minute,
+            minute_extra_time=payload.minute_extra_time,
+            player=player,
+            extra_time=payload.extra_time,
+            exact_time=timezone.now()
+        )
+        
+        # Add event to match
+        match.events.add(event)
+        
+        return EventSchema.from_orm(event)
+    except AttributeError:
+        return JsonResponse({'error': 'No profile found'}, status=403)
+
+# Update existing event
+@biro_router.put("/matches/{match_id}/events/{event_id}", response=EventSchema, auth=biro_auth)
+def update_match_event(request, match_id: int, event_id: int, payload: EventUpdateSchema):
+    """
+    Update an existing event in a match
+    """
+    try:
+        profile = request.auth.profile
+        match = get_object_or_404(Match, id=match_id, referee=profile)
+        event = get_object_or_404(Event, id=event_id)
+        
+        # Ensure event belongs to this match
+        if event not in match.events.all():
+            return JsonResponse({'error': 'Event not found in this match'}, status=404)
+        
+        # Update event fields
+        update_data = payload.dict(exclude_unset=True)
+        
+        if 'player_id' in update_data:
+            if update_data['player_id']:
+                try:
+                    player = Player.objects.get(
+                        id=update_data['player_id'],
+                        team__in=[match.team1, match.team2]
+                    )
+                    event.player = player
+                except Player.DoesNotExist:
+                    return JsonResponse({'error': 'Player not found in match teams'}, status=400)
+            else:
+                event.player = None
+            del update_data['player_id']
+        
+        # Update other fields
+        for field, value in update_data.items():
+            setattr(event, field, value)
+        
+        event.save()
+        
+        return EventSchema.from_orm(event)
+    except AttributeError:
+        return JsonResponse({'error': 'No profile found'}, status=403)
+
+# Remove event from match
+@biro_router.delete("/matches/{match_id}/events/{event_id}", auth=biro_auth)
+def remove_match_event(request, match_id: int, event_id: int):
+    """
+    Remove an event from a match
+    """
+    try:
+        profile = request.auth.profile
+        match = get_object_or_404(Match, id=match_id, referee=profile)
+        event = get_object_or_404(Event, id=event_id)
+        
+        # Ensure event belongs to this match
+        if event not in match.events.all():
+            return JsonResponse({'error': 'Event not found in this match'}, status=404)
+        
+        # Remove event from match and delete it
+        match.events.remove(event)
+        event.delete()
+        
+        return JsonResponse({'message': 'Event removed successfully'})
+    except AttributeError:
+        return JsonResponse({'error': 'No profile found'}, status=403)
+
+# Get complete match record (jegyzőkönyv)
+@biro_router.get("/matches/{match_id}/jegyzokonyv", response=JegyzokonyeSchema, auth=biro_auth)
+def get_match_jegyzokonyv(request, match_id: int):
+    """
+    Get complete match record (jegyzőkönyv) with all details
+    """
+    try:
+        profile = request.auth.profile
+        match = get_object_or_404(Match, id=match_id, referee=profile)
+        
+        events = match.events.all().order_by('minute', 'id')
+        goals = events.filter(event_type='goal')
+        yellow_cards = events.filter(event_type='yellow_card')
+        red_cards = events.filter(event_type='red_card')
+        
+        # Calculate half-time score
+        half_time_events = events.filter(minute__lte=10, event_type='goal')
+        goals_team1_ht = half_time_events.filter(player__in=match.team1.players.all()).count()
+        goals_team2_ht = half_time_events.filter(player__in=match.team2.players.all()).count()
+        
+        # Calculate match duration
+        match_duration = None
+        match_start = events.filter(event_type='match_start').first()
+        match_end = events.filter(event_type='match_end').first()
+        if match_start and match_end and match_start.exact_time and match_end.exact_time:
+            duration = match_end.exact_time - match_start.exact_time
+            match_duration = int(duration.total_seconds() / 60)
+        
+        return JegyzokonyeSchema(
+            match_id=match.id,
+            team1=TeamExtendedSchema(
+                id=match.team1.id,
+                name=match.team1.name,
+                start_year=match.team1.start_year,
+                tagozat=match.team1.tagozat,
+                color=match.team1.get_team_color(),
+                active=match.team1.active,
+                players=[
+                    PlayerExtendedSchema(
+                        id=player.id,
+                        name=player.name,
+                        csk=player.csk,
+                        start_year=player.start_year,
+                        tagozat=player.tagozat,
+                        effective_start_year=player.get_start_year(),
+                        effective_tagozat=player.get_tagozat()
+                    ) for player in match.team1.players.all()
+                ]
+            ),
+            team2=TeamExtendedSchema(
+                id=match.team2.id,
+                name=match.team2.name,
+                start_year=match.team2.start_year,
+                tagozat=match.team2.tagozat,
+                color=match.team2.get_team_color(),
+                active=match.team2.active,
+                players=[
+                    PlayerExtendedSchema(
+                        id=player.id,
+                        name=player.name,
+                        csk=player.csk,
+                        start_year=player.start_year,
+                        tagozat=player.tagozat,
+                        effective_start_year=player.get_start_year(),
+                        effective_tagozat=player.get_tagozat()
+                    ) for player in match.team2.players.all()
+                ]
+            ),
+            final_score=match.result(),
+            datetime=match.datetime.isoformat(),
+            referee=ProfileSchema.from_orm(match.referee) if match.referee else None,
+            events=[EventSchema.from_orm(event) for event in events],
+            goals_team1=[EventSchema.from_orm(goal) for goal in goals.filter(player__in=match.team1.players.all())],
+            goals_team2=[EventSchema.from_orm(goal) for goal in goals.filter(player__in=match.team2.players.all())],
+            yellow_cards=[EventSchema.from_orm(card) for card in yellow_cards],
+            red_cards=[EventSchema.from_orm(card) for card in red_cards],
+            half_time_score=(goals_team1_ht, goals_team2_ht),
+            match_duration=match_duration,
+            notes=None  # Could be extended to store referee notes
+        )
+    except AttributeError:
+        return JsonResponse({'error': 'No profile found'}, status=403)
+
+# Quick actions for common events
+@biro_router.post("/matches/{match_id}/start-match", auth=biro_auth)
+def start_match(request, match_id: int):
+    """
+    Quick action to start a match
+    """
+    try:
+        profile = request.auth.profile
+        match = get_object_or_404(Match, id=match_id, referee=profile)
+        
+        # Check if match already started
+        if match.events.filter(event_type='match_start').exists():
+            return JsonResponse({'error': 'Match already started'}, status=400)
+        
+        # Create match start event
+        event = Event.objects.create(
+            event_type='match_start',
+            half=1,
+            minute=0,
+            exact_time=timezone.now()
+        )
+        
+        match.events.add(event)
+        
+        return JsonResponse({'message': 'Match started successfully', 'event_id': event.id})
+    except AttributeError:
+        return JsonResponse({'error': 'No profile found'}, status=403)
+
+@biro_router.post("/matches/{match_id}/end-half", auth=biro_auth)
+def end_half(request, match_id: int):
+    """
+    Quick action to end current half
+    """
+    try:
+        profile = request.auth.profile
+        match = get_object_or_404(Match, id=match_id, referee=profile)
+        
+        events = match.events.all()
+        
+        # Determine what half we're ending
+        if not events.filter(event_type='half_time').exists():
+            # End first half
+            event = Event.objects.create(
+                event_type='half_time',
+                half=1,
+                minute=10,
+                exact_time=timezone.now()
+            )
+            message = 'First half ended'
+        elif not events.filter(event_type='full_time').exists():
+            # End second half
+            event = Event.objects.create(
+                event_type='full_time',
+                half=2,
+                minute=20,
+                exact_time=timezone.now()
+            )
+            message = 'Second half ended'
+        else:
+            return JsonResponse({'error': 'Match is already finished'}, status=400)
+        
+        match.events.add(event)
+        
+        return JsonResponse({'message': message, 'event_id': event.id})
+    except AttributeError:
+        return JsonResponse({'error': 'No profile found'}, status=403)
+
+@biro_router.post("/matches/{match_id}/start-second-half", auth=biro_auth)
+def start_second_half(request, match_id: int):
+    """
+    Quick action to start the second half of a match
+    """
+    try:
+        profile = request.auth.profile
+        match = get_object_or_404(Match, id=match_id, referee=profile)
+        
+        # Check if first half has ended
+        if not match.events.filter(event_type='half_time').exists():
+            return JsonResponse({'error': 'First half must be ended before starting second half'}, status=400)
+        
+        # Check if second half already started
+        second_half_events = match.events.filter(half=2, event_type='match_start')
+        if second_half_events.exists():
+            return JsonResponse({'error': 'Second half already started'}, status=400)
+        
+        # Create second half start event
+        event = Event.objects.create(
+            event_type='match_start',
+            half=2,
+            minute=11,  # Start of second half (minute 46 of total match)
+            exact_time=timezone.now()
+        )
+        
+        match.events.add(event)
+        
+        return JsonResponse({'message': 'Second half started successfully', 'event_id': event.id})
+    except AttributeError:
+        return JsonResponse({'error': 'No profile found'}, status=403)
+
+@biro_router.post("/matches/{match_id}/end-match", auth=biro_auth)
+def end_match(request, match_id: int):
+    """
+    Quick action to end a match completely
+    """
+    try:
+        profile = request.auth.profile
+        match = get_object_or_404(Match, id=match_id, referee=profile)
+        
+        # Check if match is not already ended
+        if match.events.filter(event_type='match_end').exists():
+            return JsonResponse({'error': 'Match already ended'}, status=400)
+        
+        # Create match end event
+        event = Event.objects.create(
+            event_type='match_end',
+            half=2,
+            minute=20,
+            exact_time=timezone.now()
+        )
+        
+        match.events.add(event)
+        
+        return JsonResponse({'message': 'Match ended successfully', 'event_id': event.id})
+    except AttributeError:
+        return JsonResponse({'error': 'No profile found'}, status=403)
+
+# Additional utility endpoints for referees
+
+@biro_router.get("/matches/{match_id}/timeline", auth=biro_auth)
+def get_match_timeline_endpoint(request, match_id: int):
+    """
+    Get chronological timeline of match events
+    """
+    try:
+        profile = request.auth.profile
+        match = get_object_or_404(Match, id=match_id, referee=profile)
+        
+        timeline = get_match_timeline(match)
+        return JsonResponse({'timeline': timeline})
+    except AttributeError:
+        return JsonResponse({'error': 'No profile found'}, status=403)
+
+@biro_router.get("/matches/{match_id}/current-minute", auth=biro_auth)
+def get_current_minute(request, match_id: int):
+    """
+    Get current match minute based on elapsed time
+    """
+    try:
+        profile = request.auth.profile
+        match = get_object_or_404(Match, id=match_id, referee=profile)
+        
+        current_minute = get_current_match_minute(match)
+        match_status = get_match_status(match)
+        
+        return JsonResponse({
+            'current_minute': current_minute,
+            'status': match_status,
+            'formatted_time': format_match_time(current_minute) if current_minute else None
+        })
+    except AttributeError:
+        return JsonResponse({'error': 'No profile found'}, status=403)
+
+@biro_router.get("/matches/{match_id}/statistics", auth=biro_auth)
+def get_match_statistics(request, match_id: int):
+    """
+    Get comprehensive match statistics
+    """
+    try:
+        profile = request.auth.profile
+        match = get_object_or_404(Match, id=match_id, referee=profile)
+        
+        team1_stats = get_team_statistics(1, match)
+        team2_stats = get_team_statistics(2, match)
+        half_time_score = get_half_time_score(match)
+        final_score = match.result()
+        
+        return JsonResponse({
+            'match_id': match.id,
+            'team1': team1_stats,
+            'team2': team2_stats,
+            'half_time_score': half_time_score,
+            'final_score': final_score,
+            'status': get_match_status(match)
+        })
+    except AttributeError:
+        return JsonResponse({'error': 'No profile found'}, status=403)
+
+@biro_router.post("/matches/{match_id}/validate-event", auth=biro_auth)
+def validate_event_endpoint(request, match_id: int, payload: EventCreateSchema):
+    """
+    Validate event data before creation (dry run)
+    """
+    try:
+        profile = request.auth.profile
+        match = get_object_or_404(Match, id=match_id, referee=profile)
+        
+        validation_result = validate_event_data(
+            payload.event_type,
+            payload.minute,
+            payload.half,
+            payload.player_id,
+            match
+        )
+        
+        return JsonResponse(validation_result)
+    except AttributeError:
+        return JsonResponse({'error': 'No profile found'}, status=403)
+
+# Bulk operations for referees
+
+@biro_router.post("/matches/{match_id}/quick-goal", auth=biro_auth)
+def quick_add_goal(request, match_id: int, payload: QuickGoalSchema):
+    """
+    Quick action to add a goal with minimal data
+    Expected payload: {"player_id": int, "minute": int, "half": int}
+    """
+    try:
+        profile = request.auth.profile
+        match = get_object_or_404(Match, id=match_id, referee=profile)
+        
+        # Extract validated data from schema
+        player_id = payload.player_id
+        minute = payload.minute
+        half = payload.half
+        
+        # Validate player belongs to match teams
+        try:
+            player = Player.objects.get(
+                id=player_id,
+                team__in=[match.team1, match.team2]
+            )
+        except Player.DoesNotExist:
+            return JsonResponse({'error': 'Player not found in match teams'}, status=400)
+        
+        # Create goal event
+        event = Event.objects.create(
+            event_type='goal',
+            half=half,
+            minute=minute,
+            player=player,
+            exact_time=timezone.now()
+        )
+        
+        match.events.add(event)
+        
+        return JsonResponse({
+            'message': 'Goal added successfully',
+            'event_id': event.id,
+            'player_name': player.name,
+            'minute': minute,
+            'new_score': match.result()
+        })
+    except AttributeError:
+        return JsonResponse({'error': 'No profile found'}, status=403)
+
+@biro_router.post("/matches/{match_id}/quick-card", auth=biro_auth)
+def quick_add_card(request, match_id: int, payload: QuickCardSchema):
+    """
+    Quick action to add a yellow or red card
+    Expected payload: {"player_id": int, "minute": int, "card_type": "yellow"|"red", "half": int}
+    """
+    try:
+        profile = request.auth.profile
+        match = get_object_or_404(Match, id=match_id, referee=profile)
+        
+        # Extract validated data from schema
+        player_id = payload.player_id
+        minute = payload.minute
+        card_type = payload.card_type
+        half = payload.half
+        
+        if card_type not in ['yellow', 'red']:
+            return JsonResponse({'error': 'card_type must be "yellow" or "red"'}, status=400)
+        
+        # Validate player belongs to match teams
+        try:
+            player = Player.objects.get(
+                id=player_id,
+                team__in=[match.team1, match.team2]
+            )
+        except Player.DoesNotExist:
+            return JsonResponse({'error': 'Player not found in match teams'}, status=400)
+        
+        # Create card event
+        event_type = 'yellow_card' if card_type == 'yellow' else 'red_card'
+        event = Event.objects.create(
+            event_type=event_type,
+            half=half,
+            minute=minute,
+            player=player,
+            exact_time=timezone.now()
+        )
+        
+        match.events.add(event)
+        
+        return JsonResponse({
+            'message': f'{card_type.capitalize()} card added successfully',
+            'event_id': event.id,
+            'player_name': player.name,
+            'minute': minute,
+            'card_type': card_type
+        })
+    except AttributeError:
+        return JsonResponse({'error': 'No profile found'}, status=403)
+
+@biro_router.post("/matches/{match_id}/extra-time", auth=biro_auth)
+def add_extra_time(request, match_id: int, payload: ExtraTimeSchema):
+    """
+    Add extra time to a match half
+    Expected payload: {"extra_time_minutes": int, "half": int}
+    """
+    try:
+        profile = request.auth.profile
+        match = get_object_or_404(Match, id=match_id, referee=profile)
+        
+        # Extract validated data from schema
+        extra_time_minutes = payload.extra_time_minutes
+        half = payload.half
+        
+        # Create extra time event
+        event = Event.objects.create(
+            event_type='extra_time',
+            half=half,
+            minute=20 if half == 2 else 10,  # End of regular time
+            extra_time=extra_time_minutes,
+            exact_time=timezone.now()
+        )
+        
+        match.events.add(event)
+        
+        return JsonResponse({
+            'message': f'{extra_time_minutes} minutes of extra time added to half {half}',
+            'event_id': event.id,
+            'extra_time_minutes': extra_time_minutes,
+            'half': half
+        })
+    except AttributeError:
+        return JsonResponse({'error': 'No profile found'}, status=403)
+
+# Referee dashboard endpoint
+
+@biro_router.get("/dashboard", auth=biro_auth)
+def referee_dashboard(request):
+    """
+    Get referee dashboard with upcoming and current matches
+    """
+    try:
+        profile = request.auth.profile
+        now = timezone.now()
+        
+        # Get today's matches
+        today_matches = Match.objects.filter(
+            referee=profile,
+            datetime__date=now.date()
+        ).order_by('datetime')
+        
+        # Get upcoming matches (next 7 days)
+        upcoming_matches = Match.objects.filter(
+            referee=profile,
+            datetime__gt=now,
+            datetime__lte=now + timedelta(days=7)
+        ).order_by('datetime')
+        
+        # Get recent completed matches
+        recent_matches = Match.objects.filter(
+            referee=profile,
+            datetime__lt=now,
+            datetime__gte=now - timedelta(days=7)
+        ).order_by('-datetime')
+        
+        # Process matches to include status
+        def process_match_list(matches):
+            result = []
+            for match in matches:
+                result.append({
+                    'id': match.id,
+                    'team1': str(match.team1),
+                    'team2': str(match.team2),
+                    'datetime': match.datetime.isoformat(),
+                    'status': get_match_status(match),
+                    'score': match.result()
+                })
+            return result
+        
+        return JsonResponse({
+            'today_matches': process_match_list(today_matches),
+            'upcoming_matches': process_match_list(upcoming_matches),
+            'recent_matches': process_match_list(recent_matches),
+            'total_assigned_matches': Match.objects.filter(referee=profile).count()
+        })
+    except AttributeError:
+        return JsonResponse({'error': 'No profile found'}, status=403)
 

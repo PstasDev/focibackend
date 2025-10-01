@@ -6,6 +6,7 @@ from django.contrib.auth.models import User
 from django.http import JsonResponse
 from functools import wraps
 from typing import Optional, Dict, Any
+from ninja.security import HttpBearer
 
 
 class JWTAuth:
@@ -49,10 +50,13 @@ class JWTAuth:
         """
         try:
             payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+            print(f"DEBUG: Token decoded successfully. User ID: {payload.get('user_id')}, Expires: {datetime.fromtimestamp(payload.get('exp', 0))}")
             return payload
         except jwt.ExpiredSignatureError:
+            print("DEBUG: Token has expired")
             return None
-        except jwt.InvalidTokenError:
+        except jwt.InvalidTokenError as e:
+            print(f"DEBUG: Invalid token error: {e}")
             return None
     
     @staticmethod
@@ -77,116 +81,104 @@ class JWTAuth:
             return None
 
 
-def jwt_required(view_func):
+class JWTCookieAuth:
     """
-    Decorator to require JWT authentication for views
-    Looks for JWT token in cookies with name 'auth_token'
+    Django Ninja JWT Authentication class that checks both Authorization header and cookies
     """
-    @wraps(view_func)
-    def wrapper(request, *args, **kwargs):
-        # Get token from cookies
-        token = request.COOKIES.get('auth_token')
+    def authenticate(self, request, token=None):
+        # Debug: Print what we're receiving
+        print(f"DEBUG: Headers: {dict(request.headers)}")
+        print(f"DEBUG: Cookies: {request.COOKIES}")
         
-        if not token:
-            return JsonResponse({
-                'error': 'Authentication required',
-                'message': 'No authentication token provided'
-            }, status=401)
+        # First try to get token from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+            print(f"DEBUG: Token from header: {token[:20]}...")
+        # If no token in header, try to get from cookie
+        elif not token and 'auth_token' in request.COOKIES:
+            token = request.COOKIES['auth_token']
+            print(f"DEBUG: Token from cookie: {token[:20]}...")
+        else:
+            print("DEBUG: No token found in header or cookies")
         
-        # Verify token
+        if token:
+            user = JWTAuth.verify_token(token)
+            if user:
+                print(f"DEBUG: Successfully authenticated user: {user.username}")
+                return user
+            else:
+                print("DEBUG: Token verification failed")
+        return None
+
+    def __call__(self, request):
+        return self.authenticate(request)
+
+
+class JWTBearer(HttpBearer):
+    """
+    Django Ninja JWT Authentication class (Header-only for backward compatibility)
+    """
+    def authenticate(self, request, token):
         user = JWTAuth.verify_token(token)
-        if not user:
-            return JsonResponse({
-                'error': 'Invalid token',
-                'message': 'Authentication token is invalid or expired'
-            }, status=401)
-        
-        # Add user to request
-        request.user = user
-        
-        return view_func(request, *args, **kwargs)
-    
-    return wrapper
+        if user:
+            return user
+        return None
 
 
-def admin_required(view_func):
+class AdminRequired:
     """
-    Decorator to require admin authentication for views
-    Checks if user exists and has admin privileges (is_staff or is_superuser)
+    Django Ninja Admin Authentication class that checks both Authorization header and cookies
     """
-    @wraps(view_func)
-    def wrapper(request, *args, **kwargs):
-        # First check JWT authentication
-        token = request.COOKIES.get('auth_token')
+    def authenticate(self, request, token=None):
+        # First try to get token from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+        # If no token in header, try to get from cookie
+        elif not token and 'auth_token' in request.COOKIES:
+            token = request.COOKIES['auth_token']
         
-        if not token:
-            return JsonResponse({
-                'error': 'Authentication required',
-                'message': 'No authentication token provided'
-            }, status=401)
-        
-        user = JWTAuth.verify_token(token)
-        if not user:
-            return JsonResponse({
-                'error': 'Invalid token',
-                'message': 'Authentication token is invalid or expired'
-            }, status=401)
-        
-        # Check if user has admin privileges
-        if not (user.is_staff or user.is_superuser):
-            return JsonResponse({
-                'error': 'Access denied',
-                'message': 'Admin privileges required'
-            }, status=403)
-        
-        # Add user to request
-        request.user = user
-        
-        return view_func(request, *args, **kwargs)
-    
-    return wrapper
+        if token:
+            user = JWTAuth.verify_token(token)
+            if user and (user.is_staff or user.is_superuser):
+                return user
+        return None
+
+    def __call__(self, request):
+        return self.authenticate(request)
 
 
-def biro_required(view_func):
+class BiroRequired:
     """
-    Decorator to require referee (biro) authentication for views
-    Checks if user exists and has biro profile
+    Django Ninja Referee (Biro) Authentication class that checks both Authorization header and cookies
     """
-    @wraps(view_func)
-    def wrapper(request, *args, **kwargs):
-        # First check JWT authentication
-        token = request.COOKIES.get('auth_token')
+    def authenticate(self, request, token=None):
+        # First try to get token from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+        # If no token in header, try to get from cookie
+        elif not token and 'auth_token' in request.COOKIES:
+            token = request.COOKIES['auth_token']
         
-        if not token:
-            return JsonResponse({
-                'error': 'Authentication required',
-                'message': 'No authentication token provided'
-            }, status=401)
-        
-        user = JWTAuth.verify_token(token)
-        if not user:
-            return JsonResponse({
-                'error': 'Invalid token',
-                'message': 'Authentication token is invalid or expired'
-            }, status=401)
-        
-        # Check if user has biro profile
-        try:
-            profile = user.profile
-            if not profile.biro:
-                return JsonResponse({
-                    'error': 'Access denied',
-                    'message': 'Referee privileges required'
-                }, status=403)
-        except AttributeError:
-            return JsonResponse({
-                'error': 'Access denied',
-                'message': 'No profile found'
-            }, status=403)
-        
-        # Add user to request
-        request.user = user
-        
-        return view_func(request, *args, **kwargs)
-    
-    return wrapper
+        if token:
+            user = JWTAuth.verify_token(token)
+            if user:
+                try:
+                    profile = user.profile
+                    if profile.biro:
+                        return user
+                except AttributeError:
+                    pass
+        return None
+
+    def __call__(self, request):
+        return self.authenticate(request)
+
+
+# Create instances for use in API endpoints
+jwt_cookie_auth = JWTCookieAuth()  # New cookie-compatible auth
+jwt_auth = JWTBearer()  # Keep for backward compatibility
+admin_auth = AdminRequired()
+biro_auth = BiroRequired()

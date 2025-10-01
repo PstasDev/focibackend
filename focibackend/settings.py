@@ -56,6 +56,7 @@ MIDDLEWARE = [
 
 # CORS settings
 CORS_ALLOW_ALL_ORIGINS = True  # For development only
+CORS_ALLOW_CREDENTIALS = True  # Allow cookies and credentials
 CORS_ALLOWED_HEADERS = [
     'accept',
     'accept-encoding',
@@ -68,12 +69,26 @@ CORS_ALLOWED_HEADERS = [
     'x-requested-with',
 ]
 
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
 # CSRF settings
 CSRF_TRUSTED_ORIGINS = [
     'http://localhost:3000', 
     'http://127.0.0.1:3000', 
     'http://localhost:8000', 
     'http://127.0.0.1:8000',
+]
+
+# Exempt API endpoints from CSRF protection since we're using JWT
+CSRF_EXEMPT_URLS = [
+    r'^/api/',
 ]
 
 ROOT_URLCONF = 'focibackend.urls'
