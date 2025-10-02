@@ -1,5 +1,5 @@
 from ninja import ModelSchema, Schema
-from .models import Team, Tournament, Match, Event, Player, Profile, Round, Kozlemeny, Photo
+from .models import Team, Tournament, Match, Event, Player, Profile, Round, Kozlemeny, Photo, Szankcio
 from django.contrib.auth.models import User
 
 class UserSchema(ModelSchema):
@@ -175,6 +175,26 @@ class KozlemenyUpdateSchema(Schema):
     active: bool | None = None
     priority: str | None = None
 
+# Szankció schemas
+
+class SzankcioSchema(ModelSchema):
+    team: TeamSchema | None = None
+    tournament: TournamentSchema | None = None
+
+    class Meta:
+        model = Szankcio
+        fields = '__all__'
+
+class SzankcioCreateSchema(Schema):
+    team_id: int
+    tournament_id: int
+    minus_points: int
+    reason: str | None = None
+
+class SzankcioUpdateSchema(Schema):
+    minus_points: int | None = None
+    reason: str | None = None
+
 # Time sync schema
 
 class TimeSyncSchema(Schema):
@@ -272,4 +292,21 @@ class LiveMatchUpdateSchema(Schema):
     action: str  # 'add_event', 'remove_event', 'update_event', 'start_match', 'end_match'
     event_data: EventCreateSchema | None = None
     event_id: int | None = None
+
+# Undo operation schemas
+
+class UndoEventResponseSchema(Schema):
+    """Response schema for undo operations"""
+    message: str
+    removed_event: dict | None = None
+    undone_event: dict | None = None
+    updated_score: tuple[int, int]
+    timestamp: str
+
+class EventValidationSchema(Schema):
+    """Schema for event validation responses"""
+    can_remove: bool
+    validation_errors: list[str] = []
+    warnings: list[str] = []
+    event_details: dict | None = None
 

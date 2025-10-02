@@ -904,6 +904,38 @@ def get_server_time(request):
         timestamp=int(now.timestamp())
     )
 
+# Szankciók (Sanctions)
+
+# Get all sanctions for a specific team
+@router.get("/teams/{team_id}/sanctions", response=list[SzankcioSchema])
+def get_team_sanctions(request, team_id: int):
+    """
+    Get all sanctions for a specific team in the current tournament
+    """
+    tournament = get_latest_tournament()
+    team = get_object_or_404(Team, id=team_id, tournament=tournament)
+    sanctions = Szankcio.objects.filter(team=team, tournament=tournament).order_by('-date_created')
+    return sanctions
+
+# Get all sanctions in current tournament
+@router.get("/sanctions", response=list[SzankcioSchema])
+def get_sanctions(request):
+    """
+    Get all sanctions in the current tournament
+    """
+    tournament = get_latest_tournament()
+    sanctions = Szankcio.objects.filter(tournament=tournament).order_by('-date_created')
+    return sanctions
+
+# Get specific sanction by ID
+@router.get("/sanctions/{sanction_id}", response=SzankcioSchema)
+def get_sanction(request, sanction_id: int):
+    """
+    Get a specific sanction by ID
+    """
+    sanction = get_object_or_404(Szankcio, id=sanction_id)
+    return sanction
+
 # =============================================================================
 # REFEREE (BÍRÓ) ENDPOINTS - Jegyzőkönyv Management
 # =============================================================================
@@ -1166,11 +1198,12 @@ def update_match_event(request, match_id: int, event_id: int, payload: EventUpda
     except AttributeError:
         return JsonResponse({'error': 'No profile found'}, status=403)
 
-# Remove event from match
+# Remove event from match (Enhanced for undo functionality)
 @biro_router.delete("/matches/{match_id}/events/{event_id}", auth=biro_auth)
 def remove_match_event(request, match_id: int, event_id: int):
     """
-    Remove an event from a match
+    Remove an event from a match (undo functionality)
+    Enhanced with validation and audit logging
     """
     try:
         profile = request.auth.profile
@@ -1181,11 +1214,274 @@ def remove_match_event(request, match_id: int, event_id: int):
         if event not in match.events.all():
             return JsonResponse({'error': 'Event not found in this match'}, status=404)
         
+        # Validate if event can be safely removed
+        validation_errors = []
+        
+        # Check if removing critical match control events would break the match flow
+        if event.event_type == 'match_start':
+            # Can only remove match_start if no other events exist after it
+            later_events = match.events.filter(
+                minute__gt=event.minute
+            ).exclude(id=event.id)
+            if later_events.exists():
+                validation_errors.append("Cannot remove match start - other events exist after it")
+        
+        elif event.event_type == 'half_time':
+            # Can only remove half_time if no second half events exist
+            second_half_events = match.events.filter(half=2).exclude(id=event.id)
+            if second_half_events.exists():
+                validation_errors.append("Cannot remove half-time - second half events exist")
+        
+        elif event.event_type == 'match_end':
+            # Match end can usually be safely removed
+            pass
+        
+        # Check for dependent events (e.g., if player has red card, can't have more events)
+        if event.event_type == 'red_card' and event.player:
+            # Check if player has events after the red card
+            later_player_events = match.events.filter(
+                player=event.player,
+                minute__gt=event.minute
+            ).exclude(id=event.id)
+            if later_player_events.exists():
+                validation_errors.append(f"Cannot remove red card - player {event.player.name} has events after the red card")
+        
+        if validation_errors:
+            return JsonResponse({
+                'error': 'Cannot remove event',
+                'validation_errors': validation_errors
+            }, status=400)
+        
+        # Store event details for response before deletion
+        event_details = {
+            'id': event.id,
+            'event_type': event.event_type,
+            'minute': event.minute,
+            'half': event.half,
+            'player_name': event.player.name if event.player else None,
+            'exact_time': event.exact_time.isoformat() if event.exact_time else None
+        }
+        
         # Remove event from match and delete it
         match.events.remove(event)
         event.delete()
         
-        return JsonResponse({'message': 'Event removed successfully'})
+        # Get updated match score after removal
+        updated_score = match.result()
+        
+        return JsonResponse({
+            'message': 'Event successfully undone',
+            'removed_event': event_details,
+            'updated_score': updated_score,
+            'timestamp': timezone.now().isoformat()
+        })
+    except AttributeError:
+        return JsonResponse({'error': 'No profile found'}, status=403)
+
+# Undo last event in match
+@biro_router.delete("/matches/{match_id}/undo-last-event", auth=biro_auth)
+def undo_last_event(request, match_id: int):
+    """
+    Undo the most recent event in a match
+    Convenient endpoint for quick corrections
+    """
+    try:
+        profile = request.auth.profile
+        match = get_object_or_404(Match, id=match_id, referee=profile)
+        
+        # Get the most recent event (by exact_time if available, otherwise by minute)
+        latest_event = match.events.all().order_by('-exact_time', '-minute', '-id').first()
+        
+        if not latest_event:
+            return JsonResponse({'error': 'No events to undo'}, status=400)
+        
+        # Use the same validation logic as the regular remove endpoint
+        validation_errors = []
+        
+        if latest_event.event_type == 'match_start':
+            later_events = match.events.filter(
+                minute__gt=latest_event.minute
+            ).exclude(id=latest_event.id)
+            if later_events.exists():
+                validation_errors.append("Cannot remove match start - other events exist after it")
+        
+        elif latest_event.event_type == 'half_time':
+            second_half_events = match.events.filter(half=2).exclude(id=latest_event.id)
+            if second_half_events.exists():
+                validation_errors.append("Cannot remove half-time - second half events exist")
+        
+        elif latest_event.event_type == 'red_card' and latest_event.player:
+            later_player_events = match.events.filter(
+                player=latest_event.player,
+                minute__gt=latest_event.minute
+            ).exclude(id=latest_event.id)
+            if later_player_events.exists():
+                validation_errors.append(f"Cannot remove red card - player {latest_event.player.name} has events after the red card")
+        
+        if validation_errors:
+            return JsonResponse({
+                'error': 'Cannot undo last event',
+                'validation_errors': validation_errors,
+                'event_details': {
+                    'event_type': latest_event.event_type,
+                    'minute': latest_event.minute,
+                    'player_name': latest_event.player.name if latest_event.player else None
+                }
+            }, status=400)
+        
+        # Store event details before deletion
+        event_details = {
+            'id': latest_event.id,
+            'event_type': latest_event.event_type,
+            'minute': latest_event.minute,
+            'half': latest_event.half,
+            'player_name': latest_event.player.name if latest_event.player else None,
+            'exact_time': latest_event.exact_time.isoformat() if latest_event.exact_time else None
+        }
+        
+        # Remove and delete the event
+        match.events.remove(latest_event)
+        latest_event.delete()
+        
+        # Get updated match score and status
+        updated_score = match.result()
+        
+        return JsonResponse({
+            'message': 'Last event successfully undone',
+            'undone_event': event_details,
+            'updated_score': updated_score,
+            'timestamp': timezone.now().isoformat()
+        })
+    except AttributeError:
+        return JsonResponse({'error': 'No profile found'}, status=403)
+
+# Get undoable events for a match
+@biro_router.get("/matches/{match_id}/undoable-events", auth=biro_auth)
+def get_undoable_events(request, match_id: int):
+    """
+    Get list of events that can be safely undone
+    Helps UI show which events can be removed
+    """
+    try:
+        profile = request.auth.profile
+        match = get_object_or_404(Match, id=match_id, referee=profile)
+        
+        events = match.events.all().order_by('-exact_time', '-minute', '-id')
+        undoable_events = []
+        
+        for event in events:
+            can_undo = True
+            reasons = []
+            
+            # Apply same validation logic as delete endpoints
+            if event.event_type == 'match_start':
+                later_events = match.events.filter(
+                    minute__gt=event.minute
+                ).exclude(id=event.id)
+                if later_events.exists():
+                    can_undo = False
+                    reasons.append("Other events exist after match start")
+            
+            elif event.event_type == 'half_time':
+                second_half_events = match.events.filter(half=2).exclude(id=event.id)
+                if second_half_events.exists():
+                    can_undo = False
+                    reasons.append("Second half events exist")
+            
+            elif event.event_type == 'red_card' and event.player:
+                later_player_events = match.events.filter(
+                    player=event.player,
+                    minute__gt=event.minute
+                ).exclude(id=event.id)
+                if later_player_events.exists():
+                    can_undo = False
+                    reasons.append("Player has events after red card")
+            
+            undoable_events.append({
+                'id': event.id,
+                'event_type': event.event_type,
+                'minute': event.minute,
+                'half': event.half,
+                'player_name': event.player.name if event.player else None,
+                'exact_time': event.exact_time.isoformat() if event.exact_time else None,
+                'can_undo': can_undo,
+                'cannot_undo_reasons': reasons
+            })
+        
+        return JsonResponse({
+            'match_id': match.id,
+            'undoable_events': undoable_events,
+            'total_events': len(undoable_events),
+            'undoable_count': len([e for e in undoable_events if e['can_undo']])
+        })
+    except AttributeError:
+        return JsonResponse({'error': 'No profile found'}, status=403)
+
+# Bulk undo events (undo all events after a certain minute)
+@biro_router.delete("/matches/{match_id}/undo-after-minute/{minute}", auth=biro_auth)
+def undo_events_after_minute(request, match_id: int, minute: int):
+    """
+    Undo all events that occurred after a specific minute
+    Useful for correcting major timing errors
+    """
+    try:
+        profile = request.auth.profile
+        match = get_object_or_404(Match, id=match_id, referee=profile)
+        
+        # Get events after the specified minute
+        events_to_remove = match.events.filter(minute__gt=minute).order_by('-minute', '-id')
+        
+        if not events_to_remove.exists():
+            return JsonResponse({'error': f'No events found after minute {minute}'}, status=400)
+        
+        # Validate that we can safely remove all these events
+        validation_errors = []
+        removed_events = []
+        
+        for event in events_to_remove:
+            # Store event details before removal
+            event_detail = {
+                'id': event.id,
+                'event_type': event.event_type,
+                'minute': event.minute,
+                'half': event.half,
+                'player_name': event.player.name if event.player else None,
+                'exact_time': event.exact_time.isoformat() if event.exact_time else None
+            }
+            removed_events.append(event_detail)
+        
+        # Check if any critical events would be affected
+        critical_events = events_to_remove.filter(
+            event_type__in=['match_start', 'half_time', 'match_end']
+        )
+        
+        if critical_events.exists():
+            critical_list = [f"{e.event_type} at {e.minute}'" for e in critical_events]
+            validation_errors.append(f"Would remove critical events: {', '.join(critical_list)}")
+        
+        # If there are validation errors, return them without making changes
+        if validation_errors:
+            return JsonResponse({
+                'error': 'Cannot perform bulk undo',
+                'validation_errors': validation_errors,
+                'events_that_would_be_removed': removed_events
+            }, status=400)
+        
+        # Perform the bulk removal
+        for event in events_to_remove:
+            match.events.remove(event)
+            event.delete()
+        
+        # Get updated match score
+        updated_score = match.result()
+        
+        return JsonResponse({
+            'message': f'Successfully undid {len(removed_events)} events after minute {minute}',
+            'removed_events': removed_events,
+            'removed_count': len(removed_events),
+            'updated_score': updated_score,
+            'timestamp': timezone.now().isoformat()
+        })
     except AttributeError:
         return JsonResponse({'error': 'No profile found'}, status=403)
 

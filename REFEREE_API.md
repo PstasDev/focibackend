@@ -53,7 +53,81 @@ Base URL for all referee endpoints: `/api/biro/`
 
 #### Remove Event
 - **DELETE** `/matches/{match_id}/events/{event_id}`
-- Remove an event from the match
+- Remove an event from the match (enhanced undo functionality)
+- Includes validation to prevent removing events that would break match flow
+- Returns detailed information about the removed event and updated match state
+
+### 3. Undo Functionality
+
+#### Undo Specific Event
+- **DELETE** `/matches/{match_id}/events/{event_id}`
+- Enhanced version of event removal with comprehensive validation
+- Prevents removal of events that would break match integrity
+- Response includes removed event details and updated score
+
+#### Undo Last Event
+- **DELETE** `/matches/{match_id}/undo-last-event`
+- Quick undo of the most recent event in the match
+- Automatically identifies and removes the latest event
+- Same validation as specific event removal
+- Response:
+```json
+{
+  "message": "Last event successfully undone",
+  "undone_event": {
+    "id": 456,
+    "event_type": "goal",
+    "minute": 67,
+    "half": 2,
+    "player_name": "Player Name",
+    "exact_time": "2024-10-02T15:30:00Z"
+  },
+  "updated_score": [2, 1],
+  "timestamp": "2024-10-02T15:35:00Z"
+}
+```
+
+#### Get Undoable Events
+- **GET** `/matches/{match_id}/undoable-events`
+- Returns list of all events with undo status
+- Helps UI determine which events can be safely removed
+- Response:
+```json
+{
+  "match_id": 123,
+  "undoable_events": [
+    {
+      "id": 789,
+      "event_type": "goal",
+      "minute": 67,
+      "half": 2,
+      "player_name": "Player Name",
+      "exact_time": "2024-10-02T15:30:00Z",
+      "can_undo": true,
+      "cannot_undo_reasons": []
+    },
+    {
+      "id": 456,
+      "event_type": "match_start",
+      "minute": 0,
+      "half": 1,
+      "player_name": null,
+      "exact_time": "2024-10-02T15:00:00Z",
+      "can_undo": false,
+      "cannot_undo_reasons": ["Other events exist after match start"]
+    }
+  ],
+  "total_events": 2,
+  "undoable_count": 1
+}
+```
+
+#### Bulk Undo After Minute
+- **DELETE** `/matches/{match_id}/undo-after-minute/{minute}`
+- Undo all events that occurred after a specific minute
+- Useful for correcting major timing errors or restarting from a specific point
+- Validates that no critical events (match_start, half_time) would be removed
+- Response includes list of all removed events
 
 ### 3. Quick Actions
 
@@ -167,6 +241,41 @@ The following event types are available:
 - `extra_time` - Extra time begins
 - `match_end` - Match completely finished
 
+## Undo Validation Rules
+
+The undo functionality includes several validation rules to maintain match integrity:
+
+### Event Removal Restrictions
+
+1. **Match Start Events**
+   - Cannot be removed if any other events exist after them
+   - Prevents breaking the match timeline
+
+2. **Half-Time Events**
+   - Cannot be removed if any second-half events exist
+   - Ensures logical match progression
+
+3. **Red Card Events**
+   - Cannot be removed if the player has any events after receiving the red card
+   - Maintains disciplinary consistency
+
+4. **Match Flow Integrity**
+   - The system validates event dependencies before removal
+   - Prevents actions that would create inconsistent match states
+
+### Safe Removal Guidelines
+
+Events that can typically be safely removed:
+- Goals (unless they affect player statistics dependencies)
+- Yellow cards (first card for a player)
+- Extra time events
+- Match end events
+
+Events requiring careful validation:
+- Match control events (start, half-time, end)
+- Red cards with subsequent events
+- Any event with dependent events following it
+
 ## Error Handling
 
 All endpoints return appropriate HTTP status codes:
@@ -222,6 +331,44 @@ POST /api/biro/matches/123/end-half
 5. **Get final match report:**
 ```bash
 GET /api/biro/matches/123/jegyzokonyv
+```
+
+### Undo Operations
+
+1. **Undo the last event:**
+```bash
+DELETE /api/biro/matches/123/undo-last-event
+```
+
+2. **Undo a specific event:**
+```bash
+DELETE /api/biro/matches/123/events/456
+```
+
+3. **Check which events can be undone:**
+```bash
+GET /api/biro/matches/123/undoable-events
+```
+
+4. **Undo all events after minute 60:**
+```bash
+DELETE /api/biro/matches/123/undo-after-minute/60
+```
+
+5. **Handle undo validation error:**
+```bash
+# Response when trying to undo a protected event:
+{
+  "error": "Cannot undo last event",
+  "validation_errors": [
+    "Cannot remove red card - player John Doe has events after the red card"
+  ],
+  "event_details": {
+    "event_type": "red_card",
+    "minute": 45,
+    "player_name": "John Doe"
+  }
+}
 ```
 
 This API provides comprehensive tools for referees to manage live matches and generate detailed match records efficiently.

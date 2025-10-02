@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
-from .models import Profile, Player, Team, Tournament, Round, Match, Event, Kozlemeny
+from .models import Profile, Player, Team, Tournament, Round, Match, Event, Kozlemeny, Szankcio
 
 # Admin Site Customization
 admin.site.site_header = "Foci Liga Adminisztráció"
@@ -172,6 +172,28 @@ class KozlemenyAdmin(admin.ModelAdmin):
         self.message_user(request, f'{updated} közlemény prioritása sürgősre állítva.')
     set_priority_urgent.short_description = "Prioritás beállítása: Sürgős"
 
+class SzankcioAdmin(admin.ModelAdmin):
+    list_display = ('team', 'tournament', 'minus_points', 'reason_short', 'date_created')
+    list_filter = ('tournament', 'date_created', 'minus_points')
+    search_fields = ('team__name', 'team__start_year', 'team__tagozat', 'reason')
+    ordering = ['-date_created']
+    
+    def reason_short(self, obj):
+        if obj.reason and len(obj.reason) > 50:
+            return obj.reason[:50] + '...'
+        return obj.reason or '-'
+    reason_short.short_description = 'Indoklás'
+    
+    fieldsets = (
+        (None, {
+            'fields': ('team', 'tournament', 'minus_points')
+        }),
+        ('Részletek', {
+            'fields': ('reason',),
+            'classes': ('collapse',)
+        })
+    )
+
 # Register models with enhanced admin classes
 admin.site.register(Profile, ProfileAdmin)
 admin.site.register(Player, PlayerAdmin)
@@ -181,3 +203,4 @@ admin.site.register(Round, RoundAdmin)
 admin.site.register(Match, MatchAdmin)
 admin.site.register(Event, EventAdmin)
 admin.site.register(Kozlemeny, KozlemenyAdmin)
+admin.site.register(Szankcio, SzankcioAdmin)

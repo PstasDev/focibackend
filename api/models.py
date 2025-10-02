@@ -206,3 +206,18 @@ class Kozlemeny(models.Model):
 
     def __str__(self):
         return self.title
+
+class Szankcio(models.Model):
+    team = models.ForeignKey('Team', on_delete=models.CASCADE, verbose_name="Csapat")
+    tournament = models.ForeignKey('Tournament', on_delete=models.CASCADE, verbose_name="Bajnokság")
+    minus_points = models.IntegerField(verbose_name="Pontlevonás")
+    reason = models.TextField(blank=True, null=True, verbose_name="Indoklás")
+    date_created = models.DateTimeField(auto_now_add=True, verbose_name="Létrehozás ideje")
+
+    class Meta:
+        verbose_name = "Szankció"
+        verbose_name_plural = "Szankciók"
+        ordering = ['-date_created']
+
+    def __str__(self):
+        return f"{self.team} - {self.minus_points} pont levonás ({self.tournament})"

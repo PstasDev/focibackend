@@ -1,4 +1,4 @@
-from .models import Match, Tournament
+from .models import Match, Tournament, Szankcio
 from django.shortcuts import get_object_or_404
 
 
@@ -137,6 +137,9 @@ def process_matches(tournament):
         csapat_pontkiosztas(csapatok, meccs.team1, team1_goals, team2_goals)
         csapat_pontkiosztas(csapatok, meccs.team2, team2_goals, team1_goals)
 
+    # Apply sanctions (subtract points for each team)
+    apply_sanctions(csapatok, tournament)
+
     # Rendezés: pont, gólkülönbség, lőtt gól
     csapatok = sorted(
         csapatok.values(),
@@ -176,6 +179,24 @@ def csapat_pontkiosztas(csapatok, csapat, lott, kapott):
         team['ties'] += 1
     else:
         team['losses'] += 1
+
+
+def apply_sanctions(csapatok, tournament):
+    """
+    Apply sanctions (point deductions) to teams in the tournament.
+    Subtracts minus_points from each team's total points.
+    """
+    # Get all sanctions for this tournament
+    sanctions = Szankcio.objects.filter(tournament=tournament)
+    
+    for sanction in sanctions:
+        team_id = sanction.team.id
+        if team_id in csapatok:
+            # Subtract sanction points from team's total points
+            csapatok[team_id]['points'] -= sanction.minus_points
+            # Ensure points don't go below 0
+            if csapatok[team_id]['points'] < 0:
+                csapatok[team_id]['points'] = 0
 
 
 def get_latest_tournament():
