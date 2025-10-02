@@ -27,7 +27,7 @@ app.add_router("/biro", biro_router)
 
 # Authentication endpoints
 
-@router.post("/auth/login", response=LoginResponseSchema)
+@router.post("/auth/login")
 def login(request, payload: LoginSchema):
     """
     Login endpoint that validates credentials and returns JWT token
@@ -43,37 +43,70 @@ def login(request, payload: LoginSchema):
             # Generate JWT token
             token = JWTAuth.encode_token(user.id, user.username)
             
-            # Return response with token
-            return LoginResponseSchema(
-                success=True,
-                message="Login successful",
-                user=UserSchema.from_orm(user),
-                token=token
+            # Create response
+            response_data = {
+                "success": True,
+                "message": "Login successful",
+                "user": {
+                    "id": user.id,
+                    "username": user.username,
+                    "email": user.email,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "is_staff": user.is_staff,
+                    "is_active": user.is_active
+                },
+                "token": token
+            }
+            
+            response = JsonResponse(response_data)
+            
+            # Set HTTP-only cookie for enhanced security
+            response.set_cookie(
+                'auth_token',
+                token,
+                max_age=24*60*60,  # 24 hours (same as JWT expiry)
+                httponly=True,     # Prevent XSS attacks
+                secure=False,      # Set to True in production with HTTPS
+                samesite='Lax',    # CSRF protection
+                path='/'           # Available for entire site
             )
+            
+            return response
         else:
-            return LoginResponseSchema(
-                success=False,
-                message="Account is disabled",
-                user=None,
-                token=None
-            )
+            return JsonResponse({
+                "success": False,
+                "message": "Account is disabled",
+                "user": None,
+                "token": None
+            })
     else:
-        return LoginResponseSchema(
-            success=False,
-            message="Invalid username or password",
-            user=None,
-            token=None
-        )
+        return JsonResponse({
+            "success": False,
+            "message": "Invalid username or password",
+            "user": None,
+            "token": None
+        })
 
-@router.post("/auth/logout", response=LogoutResponseSchema)
+@router.post("/auth/logout")
 def logout(request):
     """
-    Logout endpoint - with token-based auth, logout is handled client-side
+    Logout endpoint - deletes HTTP-only authentication cookies
     """
-    return LogoutResponseSchema(
-        success=True,
-        message="Logout successful"
+    response = JsonResponse({
+        "success": True,
+        "message": "Logout successful"
+    })
+    
+    # Delete the auth_token cookie by setting it to expire immediately
+    response.delete_cookie(
+        'auth_token',
+        path='/',
+        domain=None,  # Will use current domain
+        samesite='Lax'  # or 'Strict' depending on your security requirements
     )
+    
+    return response
 
 @router.get("/auth/status", response=AuthStatusSchema, auth=jwt_cookie_auth)
 def auth_status(request):
