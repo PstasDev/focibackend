@@ -126,7 +126,8 @@ def process_matches(tournament):
     csapatok = {}
 
     # Csak az adott bajnokság meccsei
-    meccsek = Match.objects.filter(tournament=tournament)
+    # AHOL VANNAK A MATCHNEK EVENTJEI IS
+    meccsek = Match.objects.filter(tournament=tournament, events__isnull=False).distinct()
 
     for meccs in meccsek:
         # Meccsen belül gólok számolása Event alapján
