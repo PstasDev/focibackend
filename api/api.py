@@ -226,6 +226,7 @@ def get_teams(request):
             start_year=team.start_year,
             tagozat=team.tagozat,
             color=team.get_team_color(),
+            logo_url=team.logo_url,
             active=team.active,
             players=[
                 PlayerExtendedSchema(
@@ -252,6 +253,7 @@ def get_team(request, team_id: int):
         start_year=team.start_year,
         tagozat=team.tagozat,
         color=team.get_team_color(),
+        logo_url=team.logo_url,
         active=team.active,
         players=[
             PlayerExtendedSchema(
@@ -416,6 +418,7 @@ def get_all_teams(request):
             start_year=team.start_year,
             tagozat=team.tagozat,
             color=team.get_team_color(),
+            logo_url=team.logo_url,
             active=team.active,
             players=[
                 PlayerExtendedSchema(
@@ -441,6 +444,7 @@ def get_any_team(request, team_id: int):
         start_year=team.start_year,
         tagozat=team.tagozat,
         color=team.get_team_color(),
+        logo_url=team.logo_url,
         active=team.active,
         players=[
             PlayerExtendedSchema(
@@ -467,6 +471,7 @@ def get_active_teams(request):
             start_year=team.start_year,
             tagozat=team.tagozat,
             color=team.get_team_color(),
+            logo_url=team.logo_url,
             active=team.active,
             players=[
                 PlayerExtendedSchema(
@@ -494,6 +499,7 @@ def get_inactive_teams(request):
             start_year=team.start_year,
             tagozat=team.tagozat,
             color=team.get_team_color(),
+            logo_url=team.logo_url,
             active=team.active,
             players=[
                 PlayerExtendedSchema(
@@ -994,6 +1000,7 @@ def get_live_matches(request):
                     start_year=match.team1.start_year,
                     tagozat=match.team1.tagozat,
                     color=match.team1.get_team_color(),
+                    logo_url=match.team1.logo_url,
                     active=match.team1.active,
                     players=[
                         PlayerExtendedSchema(
@@ -1013,6 +1020,7 @@ def get_live_matches(request):
                     start_year=match.team2.start_year,
                     tagozat=match.team2.tagozat,
                     color=match.team2.get_team_color(),
+                    logo_url=match.team2.logo_url,
                     active=match.team2.active,
                     players=[
                         PlayerExtendedSchema(
@@ -1070,6 +1078,7 @@ def get_match_for_referee(request, match_id: int):
                 start_year=match.team1.start_year,
                 tagozat=match.team1.tagozat,
                 color=match.team1.get_team_color(),
+                logo_url=match.team1.logo_url,
                 active=match.team1.active,
                 players=[
                     PlayerExtendedSchema(
@@ -1089,6 +1098,7 @@ def get_match_for_referee(request, match_id: int):
                 start_year=match.team2.start_year,
                 tagozat=match.team2.tagozat,
                 color=match.team2.get_team_color(),
+                logo_url=match.team2.logo_url,
                 active=match.team2.active,
                 players=[
                     PlayerExtendedSchema(
@@ -1521,6 +1531,7 @@ def get_match_jegyzokonyv(request, match_id: int):
                 start_year=match.team1.start_year,
                 tagozat=match.team1.tagozat,
                 color=match.team1.get_team_color(),
+                logo_url=match.team1.logo_url,
                 active=match.team1.active,
                 players=[
                     PlayerExtendedSchema(
@@ -1540,6 +1551,7 @@ def get_match_jegyzokonyv(request, match_id: int):
                 start_year=match.team2.start_year,
                 tagozat=match.team2.tagozat,
                 color=match.team2.get_team_color(),
+                logo_url=match.team2.logo_url,
                 active=match.team2.active,
                 players=[
                     PlayerExtendedSchema(
