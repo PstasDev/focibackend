@@ -963,14 +963,13 @@ def get_referee_matches(request):
 @biro_router.get("/live-matches", response=list[MatchStatusSchema], auth=biro_auth)
 def get_live_matches(request):
     """
-    Get matches that are currently live or about to start (referee can manage)
+    Get matches that are currently live or about to start
     """
     try:
         profile = request.auth.profile
         now = timezone.now()
-        # Get matches from today and tomorrow that are assigned to this referee
+        # Get all matches from today and tomorrow (not just assigned to this referee)
         matches = Match.objects.filter(
-            referee=profile,
             datetime__gte=now.replace(hour=0, minute=0, second=0),
             datetime__lte=now + timedelta(days=1)
         ).order_by('datetime')
@@ -1930,22 +1929,19 @@ def referee_dashboard(request):
         profile = request.auth.profile
         now = timezone.now()
         
-        # Get today's matches
+        # Get today's matches (all matches, not just assigned to this referee)
         today_matches = Match.objects.filter(
-            referee=profile,
             datetime__date=now.date()
         ).order_by('datetime')
         
-        # Get upcoming matches (next 7 days)
+        # Get upcoming matches (next 7 days, all matches)
         upcoming_matches = Match.objects.filter(
-            referee=profile,
             datetime__gt=now,
             datetime__lte=now + timedelta(days=7)
         ).order_by('datetime')
         
-        # Get recent completed matches
+        # Get recent completed matches (all matches from last 7 days)
         recent_matches = Match.objects.filter(
-            referee=profile,
             datetime__lt=now,
             datetime__gte=now - timedelta(days=7)
         ).order_by('-datetime')
@@ -1968,7 +1964,7 @@ def referee_dashboard(request):
             'today_matches': process_match_list(today_matches),
             'upcoming_matches': process_match_list(upcoming_matches),
             'recent_matches': process_match_list(recent_matches),
-            'total_assigned_matches': Match.objects.filter(referee=profile).count()
+            'total_matches': Match.objects.count()
         })
     except AttributeError:
         return JsonResponse({'error': 'No profile found'}, status=403)
