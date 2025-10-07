@@ -8,13 +8,56 @@ from .utils import process_matches, get_goal_scorers, get_latest_tournament
 from .referee_utils import (
     get_match_status, validate_event_data, get_half_time_score, 
     get_match_timeline, get_player_statistics, get_team_statistics,
-    can_referee_edit_match, format_match_time, get_current_match_minute
+    can_referee_edit_match, format_match_time, get_current_match_minute,
+    get_current_extra_time, get_first_half_end_minute, get_second_half_start_minute, get_match_end_minute
 )
 from datetime import datetime, timedelta
 from django.utils import timezone
 from django.contrib.auth import authenticate
 from django.http import JsonResponse
 from .auth import JWTAuth, jwt_auth, jwt_cookie_auth, admin_auth, biro_auth
+
+
+def event_to_response_schema(event) -> EventResponseSchema:
+    """Convert Event object to EventResponseSchema with formatted time"""
+    formatted_time = f"{event.minute}+{event.minute_extra_time}'" if event.minute_extra_time else f"{event.minute}'"
+    
+    return EventResponseSchema(
+        id=event.id,
+        event_type=event.event_type,
+        half=event.half,
+        minute=event.minute,
+        minute_extra_time=event.minute_extra_time,
+        formatted_time=formatted_time,
+        exact_time=event.exact_time.isoformat() if event.exact_time else None,
+        player=PlayerSchema.from_orm(event.player) if event.player else None,
+        extra_time=event.extra_time
+    )
+
+
+def match_to_schema(match) -> dict:
+    """Convert Match object to MatchSchema dict with properly formatted events"""
+    # Convert match to dict first, excluding problematic related fields
+    match_dict = {
+        'id': match.id,
+        'team1': match.team1,
+        'team2': match.team2,
+        'tournament': match.tournament,
+        'round_obj': match.round_obj,
+        'referee': match.referee,
+        'datetime': match.datetime,
+        'events': [event_to_response_schema(event) for event in match.events.all()],
+        'photos': list(match.photos.all()) if hasattr(match, 'photos') else []
+    }
+    
+    # Use MatchSchema to validate and serialize
+    match_schema = MatchSchema.model_validate(match_dict)
+    return match_schema.model_dump()
+
+
+def matches_to_schema_list(matches) -> list:
+    """Convert Match queryset to list of MatchSchema dicts with properly formatted events"""
+    return [match_to_schema(match) for match in matches]
 
 
 app = NinjaAPI(csrf=False)  # Disable CSRF for API since we use JWT
@@ -212,7 +255,8 @@ def get_standings(request):
 @router.get("/matches", response=list[MatchSchema])
 def get_matches(request):
     tournament = get_latest_tournament()
-    return Match.objects.filter(tournament=tournament)
+    matches = Match.objects.filter(tournament=tournament).prefetch_related('events', 'events__player')
+    return matches_to_schema_list(matches)
 
 # Bajnokság csapatai (legújabb bajnokság)
 @router.get("/teams", response=list[TeamExtendedSchema])
@@ -292,9 +336,10 @@ def get_team_players(request, team_id: int):
 def get_team_matches(request, team_id: int):
     tournament = get_latest_tournament()
     team = get_object_or_404(Team, id=team_id, tournament=tournament)
-    return Match.objects.filter(tournament=tournament).filter(
+    matches = Match.objects.filter(tournament=tournament).filter(
         models.Q(team1=team) | models.Q(team2=team)
-    )
+    ).prefetch_related('events', 'events__player')
+    return matches_to_schema_list(matches)
 
 # Góllövők (legújabb bajnokság)
 @router.get("/topscorers", response=list[TopScorerSchema])
@@ -325,7 +370,8 @@ def get_round(request, round_number: int):
 def get_round_matches(request, round_number: int):
     tournament = get_latest_tournament()
     round_obj = get_object_or_404(Round, tournament=tournament, number=round_number)
-    return Match.objects.filter(round_obj=round_obj)
+    matches = Match.objects.filter(round_obj=round_obj).prefetch_related('events', 'events__player')
+    return matches_to_schema_list(matches)
     
 # Összes gól (legújabb bajnokság)
 @router.get("/goals", response=list[EventSchema])
@@ -726,19 +772,21 @@ def get_referee_profiles(request):
 # Minden meccs lekérdezése (admin - minden bajnokságból)
 @admin_router.get("/matches/all", response=list[MatchSchema], auth=admin_auth)
 def get_all_matches(request):
-    return Match.objects.all()
+    matches = Match.objects.all().prefetch_related('events', 'events__player')
+    return matches_to_schema_list(matches)
 
 # Meccs lekérdezése
 @router.get("/matches/{match_id}", response=MatchSchema)
 def get_match(request, match_id: int):
     match = get_object_or_404(Match, id=match_id)
-    return match
+    return match_to_schema(match)
 
 # Adott bíró meccsei
 @router.get("/profiles/{profile_id}/matches", response=list[MatchSchema])
 def get_referee_matches(request, profile_id: int):
     profile = get_object_or_404(Profile, id=profile_id, biro=True)
-    return Match.objects.filter(referee=profile)
+    matches = Match.objects.filter(referee=profile).prefetch_related('events', 'events__player')
+    return matches_to_schema_list(matches)
 
 # Minden gól lekérdezése (admin - minden bajnokságból)
 @admin_router.get("/goals/all", response=list[EventSchema], auth=admin_auth)
@@ -954,8 +1002,8 @@ def get_referee_matches(request):
     """
     try:
         profile = request.auth.profile
-        matches = Match.objects.filter(referee=profile).order_by('datetime')
-        return matches
+        matches = Match.objects.filter(referee=profile).order_by('datetime').prefetch_related('events', 'events__player')
+        return matches_to_schema_list(matches)
     except AttributeError:
         return []
 
@@ -1035,7 +1083,7 @@ def get_live_matches(request):
                 ),
                 datetime=match.datetime.isoformat(),
                 referee=ProfileSchema.from_orm(match.referee) if match.referee else None,
-                events=[EventSchema.from_orm(event) for event in events],
+                events=[event_to_response_schema(event) for event in events],
                 score=match.result(),
                 status=status
             ))
@@ -1052,7 +1100,7 @@ def get_match_for_referee(request, match_id: int):
     """
     try:
         profile = request.auth.profile
-        match = get_object_or_404(Match, id=match_id, referee=profile)
+        match = get_object_or_404(Match, id=match_id)
         
         events = match.events.all().order_by('minute', 'id')
         
@@ -1113,7 +1161,7 @@ def get_match_for_referee(request, match_id: int):
             ),
             datetime=match.datetime.isoformat(),
             referee=ProfileSchema.from_orm(match.referee) if match.referee else None,
-            events=[EventSchema.from_orm(event) for event in events],
+            events=[event_to_response_schema(event) for event in events],
             score=match.result(),
             status=status
         )
@@ -1121,14 +1169,14 @@ def get_match_for_referee(request, match_id: int):
         return JsonResponse({'error': 'No profile found'}, status=403)
 
 # Add event to match (live match updates)
-@biro_router.post("/matches/{match_id}/events", response=EventSchema, auth=biro_auth)
+@biro_router.post("/matches/{match_id}/events", response=EventResponseSchema, auth=biro_auth)
 def add_match_event(request, match_id: int, payload: EventCreateSchema):
     """
     Add a new event to a match (goals, cards, etc.)
     """
     try:
         profile = request.auth.profile
-        match = get_object_or_404(Match, id=match_id, referee=profile)
+        match = get_object_or_404(Match, id=match_id)
         
         # Validate event type
         valid_event_types = [choice[0] for choice in Event.EVENT_TYPES]
@@ -1161,19 +1209,19 @@ def add_match_event(request, match_id: int, payload: EventCreateSchema):
         # Add event to match
         match.events.add(event)
         
-        return EventSchema.from_orm(event)
+        return event_to_response_schema(event)
     except AttributeError:
         return JsonResponse({'error': 'No profile found'}, status=403)
 
 # Update existing event
-@biro_router.put("/matches/{match_id}/events/{event_id}", response=EventSchema, auth=biro_auth)
+@biro_router.put("/matches/{match_id}/events/{event_id}", response=EventResponseSchema, auth=biro_auth)
 def update_match_event(request, match_id: int, event_id: int, payload: EventUpdateSchema):
     """
     Update an existing event in a match
     """
     try:
         profile = request.auth.profile
-        match = get_object_or_404(Match, id=match_id, referee=profile)
+        match = get_object_or_404(Match, id=match_id)
         event = get_object_or_404(Event, id=event_id)
         
         # Ensure event belongs to this match
@@ -1203,7 +1251,7 @@ def update_match_event(request, match_id: int, event_id: int, payload: EventUpda
         
         event.save()
         
-        return EventSchema.from_orm(event)
+        return event_to_response_schema(event)
     except AttributeError:
         return JsonResponse({'error': 'No profile found'}, status=403)
 
@@ -1216,7 +1264,7 @@ def remove_match_event(request, match_id: int, event_id: int):
     """
     try:
         profile = request.auth.profile
-        match = get_object_or_404(Match, id=match_id, referee=profile)
+        match = get_object_or_404(Match, id=match_id)
         event = get_object_or_404(Event, id=event_id)
         
         # Ensure event belongs to this match
@@ -1296,7 +1344,7 @@ def undo_last_event(request, match_id: int):
     """
     try:
         profile = request.auth.profile
-        match = get_object_or_404(Match, id=match_id, referee=profile)
+        match = get_object_or_404(Match, id=match_id)
         
         # Get the most recent event (by exact_time if available, otherwise by minute)
         latest_event = match.events.all().order_by('-exact_time', '-minute', '-id').first()
@@ -1373,7 +1421,7 @@ def get_undoable_events(request, match_id: int):
     """
     try:
         profile = request.auth.profile
-        match = get_object_or_404(Match, id=match_id, referee=profile)
+        match = get_object_or_404(Match, id=match_id)
         
         events = match.events.all().order_by('-exact_time', '-minute', '-id')
         undoable_events = []
@@ -1435,7 +1483,7 @@ def undo_events_after_minute(request, match_id: int, minute: int):
     """
     try:
         profile = request.auth.profile
-        match = get_object_or_404(Match, id=match_id, referee=profile)
+        match = get_object_or_404(Match, id=match_id)
         
         # Get events after the specified minute
         events_to_remove = match.events.filter(minute__gt=minute).order_by('-minute', '-id')
@@ -1502,15 +1550,16 @@ def get_match_jegyzokonyv(request, match_id: int):
     """
     try:
         profile = request.auth.profile
-        match = get_object_or_404(Match, id=match_id, referee=profile)
+        match = get_object_or_404(Match, id=match_id)
         
-        events = match.events.all().order_by('minute', 'id')
+        events = match.events.all().order_by('minute', 'minute_extra_time', 'id')
         goals = events.filter(event_type='goal')
         yellow_cards = events.filter(event_type='yellow_card')
         red_cards = events.filter(event_type='red_card')
         
-        # Calculate half-time score
-        half_time_events = events.filter(minute__lte=10, event_type='goal')
+        # Calculate half-time score using dynamic first half end minute
+        first_half_end_minute = get_first_half_end_minute(match)
+        half_time_events = events.filter(minute__lte=first_half_end_minute, event_type='goal')
         goals_team1_ht = half_time_events.filter(player__in=match.team1.players.all()).count()
         goals_team2_ht = half_time_events.filter(player__in=match.team2.players.all()).count()
         
@@ -1567,11 +1616,11 @@ def get_match_jegyzokonyv(request, match_id: int):
             final_score=match.result(),
             datetime=match.datetime.isoformat(),
             referee=ProfileSchema.from_orm(match.referee) if match.referee else None,
-            events=[EventSchema.from_orm(event) for event in events],
-            goals_team1=[EventSchema.from_orm(goal) for goal in goals.filter(player__in=match.team1.players.all())],
-            goals_team2=[EventSchema.from_orm(goal) for goal in goals.filter(player__in=match.team2.players.all())],
-            yellow_cards=[EventSchema.from_orm(card) for card in yellow_cards],
-            red_cards=[EventSchema.from_orm(card) for card in red_cards],
+            events=[event_to_response_schema(event) for event in events],
+            goals_team1=[event_to_response_schema(goal) for goal in goals.filter(player__in=match.team1.players.all())],
+            goals_team2=[event_to_response_schema(goal) for goal in goals.filter(player__in=match.team2.players.all())],
+            yellow_cards=[event_to_response_schema(card) for card in yellow_cards],
+            red_cards=[event_to_response_schema(card) for card in red_cards],
             half_time_score=(goals_team1_ht, goals_team2_ht),
             match_duration=match_duration,
             notes=None  # Could be extended to store referee notes
@@ -1587,7 +1636,7 @@ def start_match(request, match_id: int):
     """
     try:
         profile = request.auth.profile
-        match = get_object_or_404(Match, id=match_id, referee=profile)
+        match = get_object_or_404(Match, id=match_id)
         
         # Check if match already started
         if match.events.filter(event_type='match_start').exists():
@@ -1597,7 +1646,7 @@ def start_match(request, match_id: int):
         event = Event.objects.create(
             event_type='match_start',
             half=1,
-            minute=0,
+            minute=1,
             exact_time=timezone.now()
         )
         
@@ -1608,32 +1657,35 @@ def start_match(request, match_id: int):
         return JsonResponse({'error': 'No profile found'}, status=403)
 
 @biro_router.post("/matches/{match_id}/end-half", auth=biro_auth)
-def end_half(request, match_id: int):
+def end_half(request, match_id: int, payload: EndHalfSchema):
     """
     Quick action to end current half
     """
     try:
         profile = request.auth.profile
-        match = get_object_or_404(Match, id=match_id, referee=profile)
+        match = get_object_or_404(Match, id=match_id)
         
         events = match.events.all()
         
         # Determine what half we're ending
         if not events.filter(event_type='half_time').exists():
-            # End first half
+            # End first half - use dynamic minute (default 45 if no specific events)
+            current_minute = get_current_match_minute(match) or 45
             event = Event.objects.create(
                 event_type='half_time',
                 half=1,
-                minute=10,
+                minute=payload.minute,
+                minute_extra_time=payload.minute_extra_time,
                 exact_time=timezone.now()
             )
             message = 'First half ended'
         elif not events.filter(event_type='full_time').exists():
-            # End second half
+            # End second half - use dynamic minute (default 90 if no specific events)
+            current_minute = get_current_match_minute(match) or 90
             event = Event.objects.create(
                 event_type='full_time',
                 half=2,
-                minute=20,
+                minute=current_minute,
                 exact_time=timezone.now()
             )
             message = 'Second half ended'
@@ -1653,7 +1705,7 @@ def start_second_half(request, match_id: int):
     """
     try:
         profile = request.auth.profile
-        match = get_object_or_404(Match, id=match_id, referee=profile)
+        match = get_object_or_404(Match, id=match_id)
         
         # Check if first half has ended
         if not match.events.filter(event_type='half_time').exists():
@@ -1664,11 +1716,10 @@ def start_second_half(request, match_id: int):
         if second_half_events.exists():
             return JsonResponse({'error': 'Second half already started'}, status=400)
         
-        # Create second half start event
         event = Event.objects.create(
             event_type='match_start',
             half=2,
-            minute=11,  # Start of second half (minute 46 of total match)
+            minute=11,
             exact_time=timezone.now()
         )
         
@@ -1679,23 +1730,25 @@ def start_second_half(request, match_id: int):
         return JsonResponse({'error': 'No profile found'}, status=403)
 
 @biro_router.post("/matches/{match_id}/end-match", auth=biro_auth)
-def end_match(request, match_id: int):
+def end_match(request, match_id: int, payload: EndMatchSchema):
     """
     Quick action to end a match completely
     """
     try:
         profile = request.auth.profile
-        match = get_object_or_404(Match, id=match_id, referee=profile)
+        match = get_object_or_404(Match, id=match_id)
         
         # Check if match is not already ended
         if match.events.filter(event_type='match_end').exists():
             return JsonResponse({'error': 'Match already ended'}, status=400)
         
-        # Create match end event
+        # Create match end event - use dynamic minute (default 90 if no specific events)
+        current_minute = get_current_match_minute(match) or 90
         event = Event.objects.create(
             event_type='match_end',
             half=2,
-            minute=20,
+            minute=payload.minute,
+            minute_extra_time=payload.minute_extra_time,
             exact_time=timezone.now()
         )
         
@@ -1714,7 +1767,7 @@ def get_match_timeline_endpoint(request, match_id: int):
     """
     try:
         profile = request.auth.profile
-        match = get_object_or_404(Match, id=match_id, referee=profile)
+        match = get_object_or_404(Match, id=match_id)
         
         timeline = get_match_timeline(match)
         return JsonResponse({'timeline': timeline})
@@ -1724,19 +1777,82 @@ def get_match_timeline_endpoint(request, match_id: int):
 @biro_router.get("/matches/{match_id}/current-minute", auth=biro_auth)
 def get_current_minute(request, match_id: int):
     """
-    Get current match minute based on elapsed time
+    Get current match minute based on match progression logic
     """
     try:
         profile = request.auth.profile
-        match = get_object_or_404(Match, id=match_id, referee=profile)
+        match = get_object_or_404(Match, id=match_id)
         
-        current_minute = get_current_match_minute(match)
+        # Check all events for this match
+        events = match.events.all().order_by('id')
+        
+        # Check if there was a half_time event
+        half_time_event = events.filter(event_type='half_time').first()
+        full_time_event = events.filter(event_type='full_time').first()
+        match_start_events = events.filter(event_type='match_start').order_by('id')
+        
+        current_minute = None
+        current_extra_time = None
         match_status = get_match_status(match)
+        
+        if full_time_event:
+            # Match is over
+            current_minute = full_time_event.minute
+            current_extra_time = full_time_event.minute_extra_time
+        elif half_time_event and not match_start_events.filter(half=2).exists():
+            # Half time break
+            current_minute = half_time_event.minute
+            current_extra_time = half_time_event.minute_extra_time
+            match_status = "half_time"
+        else:
+            # Match is in progress - calculate current minute
+            from django.utils import timezone
+            now = timezone.now()
+            
+            if match_start_events.filter(half=2).exists():
+                # Second half logic
+                second_half_start = match_start_events.filter(half=2).first()
+                if second_half_start and second_half_start.exact_time:
+                    elapsed_seconds = (now - second_half_start.exact_time).total_seconds()
+                    elapsed_minutes = int(elapsed_seconds / 60)
+                    
+                    first_half_end = get_first_half_end_minute(match)
+                    
+                    # Match the first half pattern:
+                    # elapsed_minutes 1-10: show as normal minutes
+                    # elapsed_minutes 11+: show as last_regular_minute + extra_time
+                    if elapsed_minutes <= 10:
+                        current_minute = first_half_end + elapsed_minutes
+                        current_extra_time = None
+                    else:
+                        # Extra time: minute stays at the end of regular second half time
+                        current_minute = first_half_end + 10
+                        current_extra_time = elapsed_minutes - 10
+                else:
+                    current_minute = get_first_half_end_minute(match) + 1
+                    current_extra_time = None
+            else:
+                # First half logic
+                first_half_start = match_start_events.filter(half=1).first()
+                if first_half_start and first_half_start.exact_time:
+                    elapsed_seconds = (now - first_half_start.exact_time).total_seconds()
+                    elapsed_minutes = int(elapsed_seconds / 60)
+                    
+                    if elapsed_minutes < 11:
+                        current_minute = max(1, elapsed_minutes)
+                        current_extra_time = None
+                    else:
+                        current_minute = 10
+                        current_extra_time = elapsed_minutes - 10
+                else:
+                    current_minute = 1
+                    current_extra_time = None
         
         return JsonResponse({
             'current_minute': current_minute,
+            'current_extra_time': current_extra_time,
             'status': match_status,
-            'formatted_time': format_match_time(current_minute) if current_minute else None
+            'formatted_time': format_match_time(current_minute, current_extra_time) if current_minute else None
         })
     except AttributeError:
         return JsonResponse({'error': 'No profile found'}, status=403)
@@ -1748,7 +1864,7 @@ def get_match_statistics(request, match_id: int):
     """
     try:
         profile = request.auth.profile
-        match = get_object_or_404(Match, id=match_id, referee=profile)
+        match = get_object_or_404(Match, id=match_id)
         
         team1_stats = get_team_statistics(1, match)
         team2_stats = get_team_statistics(2, match)
@@ -1773,7 +1889,7 @@ def validate_event_endpoint(request, match_id: int, payload: EventCreateSchema):
     """
     try:
         profile = request.auth.profile
-        match = get_object_or_404(Match, id=match_id, referee=profile)
+        match = get_object_or_404(Match, id=match_id)
         
         validation_result = validate_event_data(
             payload.event_type,
@@ -1797,11 +1913,12 @@ def quick_add_goal(request, match_id: int, payload: QuickGoalSchema):
     """
     try:
         profile = request.auth.profile
-        match = get_object_or_404(Match, id=match_id, referee=profile)
+        match = get_object_or_404(Match, id=match_id)
         
         # Extract validated data from schema
         player_id = payload.player_id
         minute = payload.minute
+        minute_extra_time = payload.minute_extra_time
         half = payload.half
         
         # Validate player belongs to match teams
@@ -1818,6 +1935,7 @@ def quick_add_goal(request, match_id: int, payload: QuickGoalSchema):
             event_type='goal',
             half=half,
             minute=minute,
+            minute_extra_time=minute_extra_time,
             player=player,
             exact_time=timezone.now()
         )
@@ -1829,6 +1947,8 @@ def quick_add_goal(request, match_id: int, payload: QuickGoalSchema):
             'event_id': event.id,
             'player_name': player.name,
             'minute': minute,
+            'minute_extra_time': minute_extra_time,
+            'formatted_time': f"{minute}+{minute_extra_time}'" if minute_extra_time else f"{minute}'",
             'new_score': match.result()
         })
     except AttributeError:
@@ -1842,11 +1962,12 @@ def quick_add_card(request, match_id: int, payload: QuickCardSchema):
     """
     try:
         profile = request.auth.profile
-        match = get_object_or_404(Match, id=match_id, referee=profile)
+        match = get_object_or_404(Match, id=match_id)
         
         # Extract validated data from schema
         player_id = payload.player_id
         minute = payload.minute
+        minute_extra_time = payload.minute_extra_time
         card_type = payload.card_type
         half = payload.half
         
@@ -1868,6 +1989,7 @@ def quick_add_card(request, match_id: int, payload: QuickCardSchema):
             event_type=event_type,
             half=half,
             minute=minute,
+            minute_extra_time=minute_extra_time,
             player=player,
             exact_time=timezone.now()
         )
@@ -1879,6 +2001,8 @@ def quick_add_card(request, match_id: int, payload: QuickCardSchema):
             'event_id': event.id,
             'player_name': player.name,
             'minute': minute,
+            'minute_extra_time': minute_extra_time,
+            'formatted_time': f"{minute}+{minute_extra_time}'" if minute_extra_time else f"{minute}'",
             'card_type': card_type
         })
     except AttributeError:
@@ -1892,17 +2016,22 @@ def add_extra_time(request, match_id: int, payload: ExtraTimeSchema):
     """
     try:
         profile = request.auth.profile
-        match = get_object_or_404(Match, id=match_id, referee=profile)
+        match = get_object_or_404(Match, id=match_id)
         
         # Extract validated data from schema
         extra_time_minutes = payload.extra_time_minutes
         half = payload.half
         
-        # Create extra time event
+        # Create extra time event - use dynamic end of regular time for each half
+        if half == 1:
+            regular_time_end = get_first_half_end_minute(match)
+        else:
+            regular_time_end = get_match_end_minute(match)
+        
         event = Event.objects.create(
             event_type='extra_time',
             half=half,
-            minute=20 if half == 2 else 10,  # End of regular time
+            minute=regular_time_end,
             extra_time=extra_time_minutes,
             exact_time=timezone.now()
         )

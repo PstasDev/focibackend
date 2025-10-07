@@ -124,8 +124,13 @@ class Match(models.Model):
     events = models.ManyToManyField('Event', blank=True)
     photos = models.ManyToManyField('Photo', blank=True, verbose_name="Match Photos")
 
+
     referee = models.ForeignKey('Profile', null=True, blank=True, on_delete=models.SET_NULL)
 
+    def delete(self, *args, **kwargs):
+        # Delete related events
+        self.events.all().delete()
+        super().delete(*args, **kwargs)
 
     def result(self):
         goals_team1 = self.events.filter(event_type='goal', player__in=self.team1.players.all()).count()

@@ -266,29 +266,137 @@ def format_match_time(minute: int, minute_extra_time: Optional[int] = None) -> s
 
 def get_current_match_minute(match: Match) -> Optional[int]:
     """
-    Calculate current match minute based on start time and current time
+    Get the current base minute of the match (without extra time)
+    
+    This returns the base minute from the most recent event.
+    For example, if the last event was at "10+4'", this returns 10.
     
     Args:
         match: Match object
         
     Returns:
-        Current minute of the match or None if match hasn't started
+        Current base minute of the match or None if no events
     """
-    match_start_event = match.events.filter(event_type='match_start').first()
-    if not match_start_event or not match_start_event.exact_time:
-        return None
+    # Get the most recent event by ID (most recently created)
+    # This ensures we get the actual latest event regardless of minute ordering
+    last_event = match.events.order_by('-id').first()
     
-    now = timezone.now()
-    elapsed = now - match_start_event.exact_time
-    minutes_elapsed = int(elapsed.total_seconds() / 60)
+    if last_event:
+        return last_event.minute
     
-    # Account for half time break (assume 15 minutes)
+    return None
+
+
+def get_current_extra_time(match: Match) -> Optional[int]:
+    """
+    Get the current extra time minute of the match
+    
+    This returns the extra time from the most recent event.
+    For example, if the last event was at "10+4'", this returns 4.
+    
+    Args:
+        match: Match object
+        
+    Returns:
+        Current extra time minute or None if no extra time
+    """
+    # Get the most recent event by ID (most recently created)
+    last_event = match.events.order_by('-id').first()
+    
+    if last_event:
+        return last_event.minute_extra_time
+    
+    return None
+
+
+def get_first_half_end_minute(match) -> int:
+    """
+    Get the minute when first half ended (considering extra time)
+    
+    Args:
+        match: Match object
+        
+    Returns:
+        Minute when first half ended (looks at actual half_time event)
+    """
     half_time_event = match.events.filter(event_type='half_time').first()
-    if half_time_event and half_time_event.exact_time:
-        # Check if we're in second half
-        if now > half_time_event.exact_time:
-            half_time_break = 15  # minutes
-            minutes_elapsed -= half_time_break
-            minutes_elapsed = max(45, minutes_elapsed)  # Second half starts at 45'
+    if half_time_event:
+        return half_time_event.minute
     
-    return min(minutes_elapsed, 120)  # Cap at 120 minutes
+    # If no half_time event, check the last event from first half
+    first_half_events = match.events.filter(half=1).order_by('-minute', '-minute_extra_time')
+    last_first_half_event = first_half_events.first()
+    if last_first_half_event:
+        return last_first_half_event.minute + (last_first_half_event.minute_extra_time or 0)
+    
+    # Fallback: no events in first half recorded yet
+    return 1
+
+
+def get_second_half_start_minute(match) -> int:
+    """
+    Get the minute when second half started
+    
+    Args:
+        match: Match object
+        
+    Returns:
+        Minute when second half started (based on actual events)
+    """
+    # Look for second half start event
+    second_half_start = match.events.filter(event_type='second_half').first()
+    if second_half_start:
+        return second_half_start.minute
+    
+    # If no explicit second half start, use first event of second half
+    first_second_half_event = match.events.filter(half=2).order_by('minute', 'minute_extra_time').first()
+    if first_second_half_event:
+        return first_second_half_event.minute
+    
+    # Fallback: first half end + 1
+    return get_first_half_end_minute(match) + 1
+
+
+def get_match_end_minute(match) -> int:
+    """
+    Get the minute when match ended (considering extra time)
+    
+    Args:
+        match: Match object
+        
+    Returns:
+        Minute when match ended (based on actual events, not assumptions)
+    """
+    # Check for match_end first, then full_time
+    match_end_event = match.events.filter(event_type__in=['match_end', 'full_time']).last()
+    if match_end_event:
+        return match_end_event.minute + (match_end_event.minute_extra_time or 0)
+    
+    # If no end event, get the last event in the match
+    last_event = match.events.order_by('-minute', '-minute_extra_time').first()
+    if last_event:
+        return last_event.minute + (last_event.minute_extra_time or 0)
+    
+    # No events at all
+    return 0
+
+
+def get_current_match_minute_with_extra_time(match) -> tuple[int, int]:
+    """
+    Get current match minute and extra time separately
+    
+    Args:
+        match: Match object
+        
+    Returns:
+        Tuple of (base_minute, extra_time_minute)
+    """
+    # Simplified version - in a real implementation, this would calculate
+    # based on match start time and current time
+    events = match.events.all().order_by('-minute', '-minute_extra_time')
+    last_event = events.first()
+    
+    if last_event:
+        return (last_event.minute, last_event.minute_extra_time or 0)
+    
+    return (0, 0)

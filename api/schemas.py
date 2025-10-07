@@ -99,6 +99,29 @@ class EventSchema(ModelSchema):
         model = Event
         fields = '__all__'
 
+class EndHalfSchema(Schema):
+    half: int
+    minute: int
+    minute_extra_time: int | None = None
+
+class EndMatchSchema(Schema):
+    half: int
+    minute: int
+    minute_extra_time: int | None = None
+
+
+class EventResponseSchema(Schema):
+    """Enhanced event schema with formatted time for API responses"""
+    id: int
+    event_type: str
+    half: int | None = None
+    minute: int
+    minute_extra_time: int | None = None
+    formatted_time: str  # Computed field for "X+A" format
+    exact_time: str | None = None
+    player: PlayerSchema | None = None
+    extra_time: int | None = None
+
 # Photo schemas
 
 class PhotoSchema(ModelSchema):
@@ -124,7 +147,7 @@ class MatchSchema(ModelSchema):
     tournament: TournamentSchema | None = None
     round_obj: RoundSchema | None = None
     referee: ProfileSchema | None = None
-    events: list[EventSchema] = []
+    events: list[EventResponseSchema] = []
     photos: list[PhotoSchema] = []
 
     class Meta:
@@ -150,9 +173,9 @@ class TopScorerSchema(Schema):
     goals: int
 
 class AllEventsSchema(Schema):
-    goals: list[EventSchema] = []
-    yellow_cards: list[EventSchema] = []
-    red_cards: list[EventSchema] = []
+    goals: list[EventResponseSchema] = []
+    yellow_cards: list[EventResponseSchema] = []
+    red_cards: list[EventResponseSchema] = []
 
 # Közlemény schemas
 
@@ -227,11 +250,13 @@ class AuthStatusSchema(Schema):
 class QuickGoalSchema(Schema):
     player_id: int
     minute: int
+    minute_extra_time: int | None = None  # Support for extra time (A in X+A format)
     half: int = 1
 
 class QuickCardSchema(Schema):
     player_id: int
     minute: int
+    minute_extra_time: int | None = None  # Support for extra time (A in X+A format)
     half: int = 1
     card_type: str  # "yellow" or "red"
 
@@ -265,7 +290,7 @@ class MatchStatusSchema(Schema):
     team2: TeamExtendedSchema
     datetime: str
     referee: ProfileSchema | None = None
-    events: list[EventSchema] = []
+    events: list[EventResponseSchema] = []
     score: tuple[int, int]  # (team1_goals, team2_goals)
     status: str  # 'not_started', 'first_half', 'half_time', 'second_half', 'extra_time', 'finished'
 
@@ -277,11 +302,11 @@ class JegyzokonyeSchema(Schema):
     final_score: tuple[int, int]
     datetime: str
     referee: ProfileSchema | None = None
-    events: list[EventSchema] = []
-    goals_team1: list[EventSchema] = []
-    goals_team2: list[EventSchema] = []
-    yellow_cards: list[EventSchema] = []
-    red_cards: list[EventSchema] = []
+    events: list[EventResponseSchema] = []
+    goals_team1: list[EventResponseSchema] = []
+    goals_team2: list[EventResponseSchema] = []
+    yellow_cards: list[EventResponseSchema] = []
+    red_cards: list[EventResponseSchema] = []
     half_time_score: tuple[int, int]
     match_duration: int | None = None  # Duration in minutes
     notes: str | None = None
