@@ -46,6 +46,7 @@ def match_to_schema(match) -> dict:
         'round_obj': match.round_obj,
         'referee': match.referee,
         'datetime': match.datetime,
+        'status': match.status if match.status else 'active',
         'events': [event_to_response_schema(event) for event in match.events.all()],
         'photos': list(match.photos.all()) if hasattr(match, 'photos') else []
     }
@@ -255,6 +256,7 @@ def get_standings(request):
 @router.get("/matches", response=list[MatchSchema])
 def get_matches(request):
     tournament = get_latest_tournament()
+    # Include all matches (including cancelled) for display purposes
     matches = Match.objects.filter(tournament=tournament).prefetch_related('events', 'events__player')
     return matches_to_schema_list(matches)
 
@@ -336,6 +338,7 @@ def get_team_players(request, team_id: int):
 def get_team_matches(request, team_id: int):
     tournament = get_latest_tournament()
     team = get_object_or_404(Team, id=team_id, tournament=tournament)
+    # Include all matches (including cancelled) for display purposes
     matches = Match.objects.filter(tournament=tournament).filter(
         models.Q(team1=team) | models.Q(team2=team)
     ).prefetch_related('events', 'events__player')
@@ -345,7 +348,10 @@ def get_team_matches(request, team_id: int):
 @router.get("/topscorers", response=list[TopScorerSchema])
 def get_top_scorers(request):
     tournament = get_latest_tournament()
-    matches = Match.objects.filter(tournament=tournament)
+    # Exclude cancelled matches from top scorers stats
+    matches = Match.objects.filter(tournament=tournament).exclude(
+        models.Q(status='cancelled_new_date') | models.Q(status='cancelled_no_date')
+    )
     # Get all goal events from all matches in the tournament
     goals = []
     for match in matches:
@@ -377,7 +383,10 @@ def get_round_matches(request, round_number: int):
 @router.get("/goals", response=list[EventSchema])
 def get_goals(request):
     tournament = get_latest_tournament()
-    matches = Match.objects.filter(tournament=tournament)
+    # Exclude cancelled matches from goal stats
+    matches = Match.objects.filter(tournament=tournament).exclude(
+        models.Q(status='cancelled_new_date') | models.Q(status='cancelled_no_date')
+    )
     goals = []
     for match in matches:
         goals.extend(match.events.filter(event_type='goal'))
@@ -387,7 +396,10 @@ def get_goals(request):
 @router.get("/yellow_cards", response=list[EventSchema])
 def get_yellow_cards(request):
     tournament = get_latest_tournament()
-    matches = Match.objects.filter(tournament=tournament)
+    # Exclude cancelled matches from card stats
+    matches = Match.objects.filter(tournament=tournament).exclude(
+        models.Q(status='cancelled_new_date') | models.Q(status='cancelled_no_date')
+    )
     yellow_cards = []
     for match in matches:
         yellow_cards.extend(match.events.filter(event_type='yellow_card'))
@@ -397,7 +409,10 @@ def get_yellow_cards(request):
 @router.get("/red_cards", response=list[EventSchema])
 def get_red_cards(request):
     tournament = get_latest_tournament()
-    matches = Match.objects.filter(tournament=tournament)
+    # Exclude cancelled matches from card stats
+    matches = Match.objects.filter(tournament=tournament).exclude(
+        models.Q(status='cancelled_new_date') | models.Q(status='cancelled_no_date')
+    )
     red_cards = []
     for match in matches:
         red_cards.extend(match.events.filter(event_type='red_card'))
@@ -440,7 +455,10 @@ def get_player(request, player_id: int):
 def get_player_events(request, player_id: int):
     tournament = get_latest_tournament()
     player = get_object_or_404(Player, id=player_id, team__tournament=tournament)
-    matches = Match.objects.filter(tournament=tournament)
+    # Exclude cancelled matches from player event stats
+    matches = Match.objects.filter(tournament=tournament).exclude(
+        models.Q(status='cancelled_new_date') | models.Q(status='cancelled_no_date')
+    )
     # Get all events for this player from tournament matches
     all_events = []
     for match in matches:
@@ -658,8 +676,11 @@ def get_inactive_teams(request):
 def get_team_events(request, team_id: int):
     tournament = get_latest_tournament()
     team = get_object_or_404(Team, id=team_id, tournament=tournament)
+    # Exclude cancelled matches from team event stats
     matches = Match.objects.filter(tournament=tournament).filter(
         models.Q(team1=team) | models.Q(team2=team)
+    ).exclude(
+        models.Q(status='cancelled_new_date') | models.Q(status='cancelled_no_date')
     )
     # Get all events from matches this team played in
     all_events = []
@@ -740,9 +761,11 @@ def get_captains(request):
 @admin_router.get("/players/{player_id}/events", response=AllEventsSchema, auth=admin_auth)
 def get_all_player_events(request, player_id: int):
     player = get_object_or_404(Player, id=player_id)
-    # Get all events for this player from all matches
+    # Get all events for this player from all non-cancelled matches
     all_events = []
-    all_matches = Match.objects.all()
+    all_matches = Match.objects.all().exclude(
+        models.Q(status='cancelled_new_date') | models.Q(status='cancelled_no_date')
+    )
     for match in all_matches:
         all_events.extend(match.events.filter(player=player))
 
@@ -775,6 +798,101 @@ def get_all_matches(request):
     matches = Match.objects.all().prefetch_related('events', 'events__player')
     return matches_to_schema_list(matches)
 
+# Update match (admin)
+@admin_router.put("/matches/{match_id}", response=MatchSchema, auth=admin_auth)
+def update_match_admin(request, match_id: int, payload: MatchUpdateSchema):
+    """
+    Update match details including datetime, referee, and status (admin only)
+    """
+    match = get_object_or_404(Match, id=match_id)
+    
+    update_data = payload.dict(exclude_unset=True)
+    
+    # Handle datetime update
+    if 'datetime' in update_data and update_data['datetime']:
+        from datetime import datetime as dt
+        match.datetime = dt.fromisoformat(update_data['datetime'].replace('Z', '+00:00'))
+        del update_data['datetime']
+    
+    # Handle referee update
+    if 'referee_id' in update_data:
+        if update_data['referee_id']:
+            referee = get_object_or_404(Profile, id=update_data['referee_id'], biro=True)
+            match.referee = referee
+        else:
+            match.referee = None
+        del update_data['referee_id']
+    
+    # Handle status update
+    if 'status' in update_data:
+        valid_statuses = [choice[0] for choice in Match.STATUS_CHOICES]
+        if update_data['status'] not in valid_statuses and update_data['status'] is not None:
+            return JsonResponse({'error': 'Invalid status value'}, status=400)
+        match.status = update_data['status']
+        del update_data['status']
+    
+    # Update any remaining fields
+    for field, value in update_data.items():
+        setattr(match, field, value)
+    
+    match.save()
+    
+    return match_to_schema(match)
+
+# Patch match (admin)
+@admin_router.patch("/matches/{match_id}", response=MatchSchema, auth=admin_auth)
+def patch_match_admin(request, match_id: int, payload: MatchUpdateSchema):
+    """
+    Partially update match details (admin only)
+    """
+    match = get_object_or_404(Match, id=match_id)
+    
+    update_data = payload.dict(exclude_unset=True)
+    
+    # Handle datetime update
+    if 'datetime' in update_data and update_data['datetime']:
+        from datetime import datetime as dt
+        match.datetime = dt.fromisoformat(update_data['datetime'].replace('Z', '+00:00'))
+        del update_data['datetime']
+    
+    # Handle referee update
+    if 'referee_id' in update_data:
+        if update_data['referee_id']:
+            referee = get_object_or_404(Profile, id=update_data['referee_id'], biro=True)
+            match.referee = referee
+        else:
+            match.referee = None
+        del update_data['referee_id']
+    
+    # Handle status update
+    if 'status' in update_data:
+        valid_statuses = [choice[0] for choice in Match.STATUS_CHOICES]
+        if update_data['status'] not in valid_statuses and update_data['status'] is not None:
+            return JsonResponse({'error': 'Invalid status value'}, status=400)
+        match.status = update_data['status']
+        del update_data['status']
+    
+    # Update any remaining fields
+    for field, value in update_data.items():
+        setattr(match, field, value)
+    
+    match.save()
+    
+    return match_to_schema(match)
+
+# Get match status choices
+@router.get("/match-status-choices")
+def get_match_status_choices(request):
+    """
+    Get available match status choices
+    """
+    return JsonResponse({
+        'choices': [
+            {'value': choice[0], 'label': choice[1]} 
+            for choice in Match.STATUS_CHOICES
+        ]
+    })
+
 # Meccs lekérdezése
 @router.get("/matches/{match_id}", response=MatchSchema)
 def get_match(request, match_id: int):
@@ -791,7 +909,13 @@ def get_referee_matches(request, profile_id: int):
 # Minden gól lekérdezése (admin - minden bajnokságból)
 @admin_router.get("/goals/all", response=list[EventSchema], auth=admin_auth)
 def get_all_goals_admin(request):
-    goals = Event.objects.filter(event_type='goal')
+    # Get goal events only from non-cancelled matches
+    non_cancelled_matches = Match.objects.exclude(
+        models.Q(status='cancelled_new_date') | models.Q(status='cancelled_no_date')
+    )
+    goals = []
+    for match in non_cancelled_matches:
+        goals.extend(match.events.filter(event_type='goal'))
     return goals
 
 # Gólok lekérdezése
@@ -804,7 +928,13 @@ def get_goal(request, goal_id: int):
 # Sárga lapok lekérdezése (admin - minden bajnokságból)
 @admin_router.get("/yellow_cards/all", response=list[EventSchema], auth=admin_auth)
 def get_all_yellow_cards_admin(request):
-    cards = Event.objects.filter(event_type='yellow_card')
+    # Get yellow card events only from non-cancelled matches
+    non_cancelled_matches = Match.objects.exclude(
+        models.Q(status='cancelled_new_date') | models.Q(status='cancelled_no_date')
+    )
+    cards = []
+    for match in non_cancelled_matches:
+        cards.extend(match.events.filter(event_type='yellow_card'))
     return cards
 
 # Sárga lap lekérdezése
@@ -817,7 +947,13 @@ def get_card(request, card_id: int):
 # Piros lapok lekérdezése (admin - minden bajnokságból)
 @admin_router.get("/red_cards/all", response=list[EventSchema], auth=admin_auth)
 def get_all_red_cards_admin(request):
-    cards = Event.objects.filter(event_type='red_card')
+    # Get red card events only from non-cancelled matches
+    non_cancelled_matches = Match.objects.exclude(
+        models.Q(status='cancelled_new_date') | models.Q(status='cancelled_no_date')
+    )
+    cards = []
+    for match in non_cancelled_matches:
+        cards.extend(match.events.filter(event_type='red_card'))
     return cards
 
 # Piros lap lekérdezése
@@ -1085,7 +1221,8 @@ def get_live_matches(request):
                 referee=ProfileSchema.from_orm(match.referee) if match.referee else None,
                 events=[event_to_response_schema(event) for event in events],
                 score=match.result(),
-                status=status
+                match_status=status,
+                status=match.status
             ))
         
         return match_statuses
@@ -1163,7 +1300,8 @@ def get_match_for_referee(request, match_id: int):
             referee=ProfileSchema.from_orm(match.referee) if match.referee else None,
             events=[event_to_response_schema(event) for event in events],
             score=match.result(),
-            status=status
+            match_status=status,
+            status=match.status
         )
     except AttributeError:
         return JsonResponse({'error': 'No profile found'}, status=403)
@@ -1252,6 +1390,51 @@ def update_match_event(request, match_id: int, event_id: int, payload: EventUpda
         event.save()
         
         return event_to_response_schema(event)
+    except AttributeError:
+        return JsonResponse({'error': 'No profile found'}, status=403)
+
+# Update match details (including status)
+@biro_router.put("/matches/{match_id}", response=MatchSchema, auth=biro_auth)
+def update_match(request, match_id: int, payload: MatchUpdateSchema):
+    """
+    Update match details including datetime, referee, and status
+    """
+    try:
+        profile = request.auth.profile
+        match = get_object_or_404(Match, id=match_id)
+        
+        update_data = payload.dict(exclude_unset=True)
+        
+        # Handle datetime update
+        if 'datetime' in update_data and update_data['datetime']:
+            from datetime import datetime as dt
+            match.datetime = dt.fromisoformat(update_data['datetime'].replace('Z', '+00:00'))
+            del update_data['datetime']
+        
+        # Handle referee update
+        if 'referee_id' in update_data:
+            if update_data['referee_id']:
+                referee = get_object_or_404(Profile, id=update_data['referee_id'], biro=True)
+                match.referee = referee
+            else:
+                match.referee = None
+            del update_data['referee_id']
+        
+        # Handle status update
+        if 'status' in update_data:
+            valid_statuses = [choice[0] for choice in Match.STATUS_CHOICES]
+            if update_data['status'] not in valid_statuses and update_data['status'] is not None:
+                return JsonResponse({'error': 'Invalid status value'}, status=400)
+            match.status = update_data['status']
+            del update_data['status']
+        
+        # Update any remaining fields
+        for field, value in update_data.items():
+            setattr(match, field, value)
+        
+        match.save()
+        
+        return match_to_schema(match)
     except AttributeError:
         return JsonResponse({'error': 'No profile found'}, status=403)
 

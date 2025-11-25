@@ -149,6 +149,7 @@ class MatchSchema(ModelSchema):
     referee: ProfileSchema | None = None
     events: list[EventResponseSchema] = []
     photos: list[PhotoSchema] = []
+    status: str | None = None
 
     class Meta:
         model = Match
@@ -283,6 +284,7 @@ class EventUpdateSchema(Schema):
 class MatchUpdateSchema(Schema):
     datetime: str | None = None
     referee_id: int | None = None
+    status: str | None = None
 
 class MatchStatusSchema(Schema):
     id: int
@@ -292,7 +294,8 @@ class MatchStatusSchema(Schema):
     referee: ProfileSchema | None = None
     events: list[EventResponseSchema] = []
     score: tuple[int, int]  # (team1_goals, team2_goals)
-    status: str  # 'not_started', 'first_half', 'half_time', 'second_half', 'extra_time', 'finished'
+    match_status: str  # 'not_started', 'first_half', 'half_time', 'second_half', 'extra_time', 'finished'
+    status: str | None = None  # 'active', 'cancelled_new_date', 'cancelled_no_date'
 
 class JegyzokonyeSchema(Schema):
     """Complete match record schema for detailed match reports"""

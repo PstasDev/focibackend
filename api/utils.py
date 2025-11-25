@@ -1,5 +1,6 @@
 from .models import Match, Tournament, Szankcio
 from django.shortcuts import get_object_or_404
+from django.db import models
 
 
 def get_team_rank(bajnoksag, keresett_csapat_nev):
@@ -127,7 +128,13 @@ def process_matches(tournament):
 
     # Csak az adott bajnokság meccsei
     # AHOL VANNAK A MATCHNEK EVENTJEI IS
-    meccsek = Match.objects.filter(tournament=tournament, events__isnull=False).distinct()
+    # Kizárjuk a törölt meccseket
+    meccsek = Match.objects.filter(
+        tournament=tournament, 
+        events__isnull=False
+    ).exclude(
+        models.Q(status='cancelled_new_date') | models.Q(status='cancelled_no_date')
+    ).distinct()
 
     for meccs in meccsek:
         # Meccsen belül gólok számolása Event alapján

@@ -92,8 +92,8 @@ class RoundAdmin(admin.ModelAdmin):
     get_matches_count.short_description = 'Matches'
 
 class MatchAdmin(admin.ModelAdmin):
-    list_display = ('get_match_title', 'datetime', 'tournament', 'round_obj', 'get_score', 'referee')
-    list_filter = ('tournament', 'round_obj', 'datetime')
+    list_display = ('get_match_title', 'datetime', 'tournament', 'round_obj', 'get_score', 'get_status_display', 'referee')
+    list_filter = ('tournament', 'round_obj', 'datetime', 'status')
     search_fields = ('team1__name', 'team2__name', 'tournament__name')
     filter_horizontal = ('events',)
     
@@ -105,6 +105,16 @@ class MatchAdmin(admin.ModelAdmin):
         goals1, goals2 = obj.result()
         return f"{goals1} - {goals2}"
     get_score.short_description = 'Score'
+    
+    def get_status_display(self, obj):
+        if not obj.status or obj.status == 'active':
+            return format_html('<span style="color: #28a745;">✓ Active</span>')
+        elif obj.status == 'cancelled_new_date':
+            return format_html('<span style="color: #fd7e14;">⚠ Cancelled - New Date TBD</span>')
+        elif obj.status == 'cancelled_no_date':
+            return format_html('<span style="color: #dc3545;">✗ Cancelled - No Reschedule</span>')
+        return obj.status
+    get_status_display.short_description = 'Status'
 
 class EventAdmin(admin.ModelAdmin):
     list_display = ('event_type', 'player', 'minute', 'extra_time', 'exact_time')

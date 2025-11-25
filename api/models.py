@@ -44,12 +44,21 @@ class Player(models.Model):
         return team.tagozat if team else None
 
     def get_stats(self):
-        matches = Match.objects.filter(models.Q(team1__players=self) | models.Q(team2__players=self))
+        matches = Match.objects.filter(
+            models.Q(team1__players=self) | models.Q(team2__players=self)
+        ).exclude(
+            models.Q(status='cancelled_new_date') | models.Q(status='cancelled_no_date')
+        )
+        # Get events only from non-cancelled matches
+        all_events = []
+        for match in matches:
+            all_events.extend(match.events.filter(player=self))
+        
         return {
             'matches_played': matches.count(),
-            'goals': Event.objects.filter(event_type='goal', player=self).count(),
-            'yellow_cards': Event.objects.filter(event_type='yellow_card', player=self).count(),
-            'red_cards': Event.objects.filter(event_type='red_card', player=self).count(),
+            'goals': len([e for e in all_events if e.event_type == 'goal']),
+            'yellow_cards': len([e for e in all_events if e.event_type == 'yellow_card']),
+            'red_cards': len([e for e in all_events if e.event_type == 'red_card']),
         }
 
     def __str__(self):
@@ -114,6 +123,12 @@ class Round(models.Model):
         return f"{self.tournament.name} - Round {self.number}"
     
 class Match(models.Model):
+    STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('cancelled_new_date', 'Cancelled - New Date to be Published'),
+        ('cancelled_no_date', 'Cancelled - New Date not to be Published'),
+    ]
+    
     tournament = models.ForeignKey('Tournament', on_delete=models.CASCADE)
     team1 = models.ForeignKey('Team', related_name='team1_matches', on_delete=models.CASCADE)
     team2 = models.ForeignKey('Team', related_name='team2_matches', on_delete=models.CASCADE)
@@ -124,7 +139,7 @@ class Match(models.Model):
     events = models.ManyToManyField('Event', blank=True)
     photos = models.ManyToManyField('Photo', blank=True, verbose_name="Match Photos")
 
-
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active', null=True, blank=True)
     referee = models.ForeignKey('Profile', null=True, blank=True, on_delete=models.SET_NULL)
 
     def delete(self, *args, **kwargs):
