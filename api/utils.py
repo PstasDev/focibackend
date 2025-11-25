@@ -64,7 +64,7 @@ def get_team_rank(bajnoksag, keresett_csapat_nev):
 def get_goal_scorers(events, team_filter=None):
     goal_scorers = []
 
-    # Csak gól események
+    # Only regular goals, not own goals
     goals = [e for e in events if e.event_type == "goal"]
 
     for goal in goals:
@@ -138,12 +138,21 @@ def process_matches(tournament):
 
     for meccs in meccsek:
         # Meccsen belül gólok számolása Event alapján
+        # Regular goals for each team
         team1_goals = meccs.events.filter(event_type='goal', player__in=meccs.team1.players.all()).count()
         team2_goals = meccs.events.filter(event_type='goal', player__in=meccs.team2.players.all()).count()
+        
+        # Own goals count for the opponent team
+        team1_own_goals = meccs.events.filter(event_type='own_goal', player__in=meccs.team1.players.all()).count()
+        team2_own_goals = meccs.events.filter(event_type='own_goal', player__in=meccs.team2.players.all()).count()
+        
+        # Team1's total goals include their goals + team2's own goals
+        team1_total = team1_goals + team2_own_goals
+        team2_total = team2_goals + team1_own_goals
 
         # Pontkiosztás
-        csapat_pontkiosztas(csapatok, meccs.team1, team1_goals, team2_goals)
-        csapat_pontkiosztas(csapatok, meccs.team2, team2_goals, team1_goals)
+        csapat_pontkiosztas(csapatok, meccs.team1, team1_total, team2_total)
+        csapat_pontkiosztas(csapatok, meccs.team2, team2_total, team1_total)
 
     # Apply sanctions (subtract points for each team)
     apply_sanctions(csapatok, tournament)

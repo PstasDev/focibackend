@@ -57,6 +57,7 @@ class Player(models.Model):
         return {
             'matches_played': matches.count(),
             'goals': len([e for e in all_events if e.event_type == 'goal']),
+            'own_goals': len([e for e in all_events if e.event_type == 'own_goal']),
             'yellow_cards': len([e for e in all_events if e.event_type == 'yellow_card']),
             'red_cards': len([e for e in all_events if e.event_type == 'red_card']),
         }
@@ -148,15 +149,28 @@ class Match(models.Model):
         super().delete(*args, **kwargs)
 
     def result(self):
+        # Regular goals for each team
         goals_team1 = self.events.filter(event_type='goal', player__in=self.team1.players.all()).count()
         goals_team2 = self.events.filter(event_type='goal', player__in=self.team2.players.all()).count()
-        return (goals_team1, goals_team2)
+        
+        # Own goals count for the opponent team
+        own_goals_by_team1 = self.events.filter(event_type='own_goal', player__in=self.team1.players.all()).count()
+        own_goals_by_team2 = self.events.filter(event_type='own_goal', player__in=self.team2.players.all()).count()
+        
+        # Team1 gets goals from team2's own goals, and vice versa
+        return (goals_team1 + own_goals_by_team2, goals_team2 + own_goals_by_team1)
 
     def team_goals(self, team):
         if team == self.team1:
-            return self.events.filter(event_type='goal', player__in=self.team1.players.all()).count()
+            # Team1's goals = their regular goals + team2's own goals
+            regular_goals = self.events.filter(event_type='goal', player__in=self.team1.players.all()).count()
+            opponent_own_goals = self.events.filter(event_type='own_goal', player__in=self.team2.players.all()).count()
+            return regular_goals + opponent_own_goals
         elif team == self.team2:
-            return self.events.filter(event_type='goal', player__in=self.team2.players.all()).count()
+            # Team2's goals = their regular goals + team1's own goals
+            regular_goals = self.events.filter(event_type='goal', player__in=self.team2.players.all()).count()
+            opponent_own_goals = self.events.filter(event_type='own_goal', player__in=self.team1.players.all()).count()
+            return regular_goals + opponent_own_goals
         else:
             return 0
 
@@ -167,6 +181,7 @@ class Event(models.Model):
     EVENT_TYPES = [
         ('match_start', 'Match Start'),
         ('goal', 'Goal'),
+        ('own_goal', 'Own Goal'),
         ('yellow_card', 'Yellow Card'),
         ('red_card', 'Red Card'),
         ('half_time', 'Half Time'),

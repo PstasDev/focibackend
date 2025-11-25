@@ -2137,6 +2137,57 @@ def quick_add_goal(request, match_id: int, payload: QuickGoalSchema):
     except AttributeError:
         return JsonResponse({'error': 'No profile found'}, status=403)
 
+@biro_router.post("/matches/{match_id}/quick-own-goal", auth=biro_auth)
+def quick_add_own_goal(request, match_id: int, payload: QuickOwnGoalSchema):
+    """
+    Quick action to add an own goal with minimal data
+    Expected payload: {"player_id": int, "minute": int, "half": int}
+    The player_id is the player who scored the own goal (from their team)
+    The goal counts for the opponent team
+    """
+    try:
+        profile = request.auth.profile
+        match = get_object_or_404(Match, id=match_id)
+        
+        # Extract validated data from schema
+        player_id = payload.player_id
+        minute = payload.minute
+        minute_extra_time = payload.minute_extra_time
+        half = payload.half
+        
+        # Validate player belongs to match teams
+        try:
+            player = Player.objects.get(
+                id=player_id,
+                team__in=[match.team1, match.team2]
+            )
+        except Player.DoesNotExist:
+            return JsonResponse({'error': 'Player not found in match teams'}, status=400)
+        
+        # Create own goal event
+        event = Event.objects.create(
+            event_type='own_goal',
+            half=half,
+            minute=minute,
+            minute_extra_time=minute_extra_time,
+            player=player,
+            exact_time=timezone.now()
+        )
+        
+        match.events.add(event)
+        
+        return JsonResponse({
+            'message': 'Own goal added successfully',
+            'event_id': event.id,
+            'player_name': player.name,
+            'minute': minute,
+            'minute_extra_time': minute_extra_time,
+            'formatted_time': f"{minute}+{minute_extra_time}'" if minute_extra_time else f"{minute}'",
+            'new_score': match.result()
+        })
+    except AttributeError:
+        return JsonResponse({'error': 'No profile found'}, status=403)
+
 @biro_router.post("/matches/{match_id}/quick-card", auth=biro_auth)
 def quick_add_card(request, match_id: int, payload: QuickCardSchema):
     """

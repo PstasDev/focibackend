@@ -254,6 +254,12 @@ class QuickGoalSchema(Schema):
     minute_extra_time: int | None = None  # Support for extra time (A in X+A format)
     half: int = 1
 
+class QuickOwnGoalSchema(Schema):
+    player_id: int  # Player who scored the own goal
+    minute: int
+    minute_extra_time: int | None = None  # Support for extra time (A in X+A format)
+    half: int = 1
+
 class QuickCardSchema(Schema):
     player_id: int
     minute: int
